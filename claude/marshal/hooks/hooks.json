@@ -1,0 +1,4 @@
+{
+  "description": "The Marshal fleet pane, status line and toasts on a laptop; the space inspector pane inside a Marshal space.",
+  "modules": ["./register.tsx"]
+}

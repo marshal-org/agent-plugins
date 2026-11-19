@@ -1,0 +1,14 @@
+{
+  "name": "marshal",
+  "owner": { "name": "Marshal", "email": "support@marshal.codes" },
+  "metadata": {
+    "description": "Marshal for Claude Code: hand work to Marshal runs, watch your fleet of deputy runs, and inspect a space from inside it."
+  },
+  "plugins": [
+    {
+      "name": "marshal",
+      "source": "./claude/marshal",
+      "description": "Delegate work to Marshal runs, watch your fleet of deputy runs in a live pane and answer what needs you, and inspect the space you work in."
+    }
+  ]
+}

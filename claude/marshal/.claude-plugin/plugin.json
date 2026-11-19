@@ -1,0 +1,60 @@
+{
+  "name": "marshal",
+  "version": "0.1.0",
+  "description": "Marshal in Claude Code: delegate work to Marshal runs, watch your fleet of deputy runs in a live pane and answer what needs you, and inspect the space you work in.",
+  "author": {
+    "name": "Marshal",
+    "email": "support@marshal.codes"
+  },
+  "homepage": "https://docs.marshal.codes",
+  "license": "Apache-2.0",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "url": {
+      "type": "string",
+      "title": "Marshal MCP address",
+      "description": "Your Marshal MCP address, as the Marshal web app shows it under Connect an agent, for example https://marshal.example.com/mcp. The plugin connects Claude Code to it; run /mcp once to sign in. Leave it empty if you added Marshal with claude mcp add.",
+      "default": ""
+    },
+    "server": {
+      "type": "string",
+      "title": "Marshal server",
+      "description": "Which connected Marshal MCP server the panes read, by its /mcp name. Empty uses the one from the address above, else the first connected Marshal server.",
+      "default": ""
+    },
+    "fleet": {
+      "type": "string",
+      "title": "Fleet pane",
+      "description": "auto opens the fleet pane when a session starts on a wide terminal; command opens it only with /marshal-fleet; off turns the fleet pane, its status line and toasts off.",
+      "default": "command",
+      "options": [
+        "auto",
+        "command",
+        "off"
+      ]
+    },
+    "space": {
+      "type": "string",
+      "title": "Space inspector",
+      "description": "Inside a Marshal space: auto opens the inspector when a session starts on a wide terminal; command opens it only with /marshal-space; off turns it off.",
+      "default": "auto",
+      "options": [
+        "auto",
+        "command",
+        "off"
+      ]
+    },
+    "pollSeconds": {
+      "type": "number",
+      "title": "Refresh every (seconds)",
+      "description": "How often the panes read Marshal. Lower is fresher and costs more calls.",
+      "default": 20
+    },
+    "notify": {
+      "type": "boolean",
+      "title": "Notify on new asks",
+      "description": "Raise a desktop notification when a run asks you something, as well as a toast.",
+      "default": true
+    }
+  }
+}
