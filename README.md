@@ -49,7 +49,8 @@ From this repo while it is internal: `claude plugin marketplace add ./apps/agent
 
 Settings (`/plugin configure marshal`): `url` (the MCP address), `server` (which connected MCP server
 the panes read, empty = the plugin's own, else the first Marshal server), `fleet` (`auto` / `command` /
-`off`), `space` (same, inside a space), `pollSeconds` (default 20, floor 5), `notify` (desktop
+`off`; default `command`, opened with `/marshal-fleet`), `space` (same, inside a space; default
+`command`, opened with `/marshal-space`), `pollSeconds` (default 20, floor 5), `notify` (desktop
 notification on a new ask).
 
 What it shows:

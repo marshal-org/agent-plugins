@@ -3,7 +3,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { InspectorTab } from '../types'
 import { EMPTY_INSPECTOR } from './atoms'
-import { resultJson } from './fleet-model'
+import { callJson } from './fleet-poll'
 import { format, pendingCount, tabSpec, type TabId } from './space-model'
 
 const inspectorAtom = atom({ plugin: 'marshal', key: 'inspector' } as const, EMPTY_INSPECTOR, { shape: 'inspector-1' })
@@ -13,8 +13,7 @@ export async function readTab($: EngineInterface, server: string, id: TabId, spa
   const spec = tabSpec(id, spaceReads)
   const now = await $.clock.now()
   try {
-    const result = await $.mcp.call(server, spec.tool, spec.args)
-    return { lines: format(id, resultJson(result), now), error: '', readAt: now }
+    return { lines: format(id, await callJson($, server, spec.tool, spec.args), now), error: '', readAt: now }
   } catch (err) {
     return { lines: [], error: err instanceof Error ? err.message : String(err), readAt: now }
   }

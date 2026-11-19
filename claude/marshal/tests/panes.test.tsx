@@ -17,8 +17,10 @@ const TOOLS = ['Bash', 'mcp__marshal-example__runs_attention', 'mcp__marshal-exa
 type Call = { server: string; tool: string; args: Record<string, unknown> }
 
 // The engine beneath the plugin: tools, MCP answers, the panes, the screen.
-function world(on: On, opts: { inSpace: boolean; mcp: (c: Call) => unknown | Promise<unknown>; tools?: string[] }) {
+function world(on: On, opts: { inSpace: boolean; mcp: (c: Call) => unknown | Promise<unknown>; tools?: string[]; files?: Record<string, string> }) {
   const calls: Call[] = []
+  const opened: string[] = []
+  const reads: string[] = []
   const status: (string | undefined)[] = []
   const toasts: string[] = []
   const clock = mock.clock(on)
@@ -30,7 +32,15 @@ function world(on: On, opts: { inSpace: boolean; mcp: (c: Call) => unknown | Pro
   on('fs.stat', () => (opts.inSpace ? { value: { kind: 'other', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
   on('env.get', () => ({ value: undefined }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.open', (_, e) => {
+    opened.push(e.id)
+    return { value: { isPlaced: true } }
+  })
+  on('fs.read', (_, e) => {
+    reads.push(e.path)
+    const body = opts.files?.[e.path]
+    return body === undefined ? { deny: 'ENOENT' } : { value: body }
+  })
   on('ui.status', (_, e) => {
     status.push(e.text)
     return { value: undefined }
@@ -41,7 +51,7 @@ function world(on: On, opts: { inSpace: boolean; mcp: (c: Call) => unknown | Pro
   })
   on('ui.notify', () => ({ value: { isSent: true, channel: 'terminal_bell' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
-  return { calls, status, toasts, clock }
+  return { calls, status, toasts, clock, opened, reads }
 }
 
 function fleetMcp(c: Call): unknown {
@@ -252,4 +262,30 @@ test('a run shows its pull requests when the server has runs_prs', async ($, on)
   await w.clock.advance(20000)
   const ended = w.calls.filter(c => c.tool === 'runs_prs').length - first
   expect(ended).toBeLessThan(first)
+})
+
+test('inside a space the inspector stays closed until /marshal-space', async ($, on) => {
+  const w = world(on, { inSpace: true, mcp: spaceMcp })
+  await $.session.start({ cwd: '/home/agent', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(3500)
+  expect(w.opened).toEqual([])
+  await $.command.run({ command: 'marshal-space', args: '' } as Parameters<typeof $.command.run>[0])
+  expect(w.opened).toEqual(['marshal-space'])
+})
+
+test('an audit answer over the Claude Code token limit is read from the file it was saved to', async ($, on) => {
+  const saved = '/home/agent/.claude/projects/-workspace/abc/tool-results/mcp-marshal-orchestration-spaces_audit-1.txt'
+  const note = `Error: result (61,820 characters across 1 line) exceeds maximum allowed tokens. Output has been saved to ${saved}.\nFormat: Plain text\n`
+  const w = world(on, {
+    inSpace: true,
+    mcp: c => (c.tool === 'spaces_audit' ? { content: [{ type: 'text', text: note }], isError: false } : spaceMcp(c)),
+    files: { [saved]: JSON.stringify([{ action: 'network.request', status: 'denied', resource_type: 'host', resource_id: 'big.example', created_at: '2026-11-16T09:00:00Z' }]) },
+  })
+  await $.session.start({ cwd: '/home/agent', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(3500)
+  const ui = await $.ui.mount({ ...SPACE, surface: 'terminal' })
+  await ui.press({ key: 'tab:audit' })
+  expect(await ui.find({ type: 'Text', text: /big\.example.*DENIED/ })).toBeDefined()
+  expect(w.reads).toEqual([saved])
+  await ui.unmount()
 })

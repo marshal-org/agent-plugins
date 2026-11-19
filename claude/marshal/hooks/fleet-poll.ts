@@ -3,10 +3,19 @@ import type { EngineInterface } from 'claude-code'
 
 import type { Answering, Fleet, FleetCell, FleetPr, FleetRun } from '../types'
 import { EMPTY_FLEET } from './atoms'
-import { buildCell, changes, cut, errorCell, prsFrom, resultJson, statusLine } from './fleet-model'
+import { buildCell, changes, cut, errorCell, prsFrom, resultJson, savedAnswerPath, statusLine } from './fleet-model'
 
 const fleetAtom = atom({ plugin: 'marshal', key: 'fleet' } as const, EMPTY_FLEET, { shape: 'fleet-1' })
 const answeringAtom = atom({ plugin: 'marshal', key: 'answering' } as const, null as Answering)
+
+// Call a Marshal tool and parse its JSON answer. An answer over Claude Code's
+// token limit is read back from the file Claude Code saved it to.
+export async function callJson($: EngineInterface, server: string, tool: string, args: Record<string, unknown>): Promise<unknown> {
+  const result = await $.mcp.call(server, tool, args)
+  const saved = savedAnswerPath(result)
+  if (saved === undefined) return resultJson(result)
+  return resultJson({ content: [{ type: 'text', text: await $.fs.read(saved) }], isError: false })
+}
 
 // hasPrs: the server lists runs_prs (older servers do not; no PRs then).
 export type Cell = { server: string; webUrl: string; hasPrs?: boolean; hasSpaceReads?: boolean }

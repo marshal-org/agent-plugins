@@ -1,6 +1,6 @@
 {
   "name": "marshal",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Marshal in Claude Code: delegate work to Marshal runs, watch your fleet of deputy runs in a live pane and answer what needs you, and inspect the space you work in.",
   "author": {
     "name": "Marshal",
@@ -37,7 +37,7 @@
       "type": "string",
       "title": "Space inspector",
       "description": "Inside a Marshal space: auto opens the inspector when a session starts on a wide terminal; command opens it only with /marshal-space; off turns it off.",
-      "default": "auto",
+      "default": "command",
       "options": [
         "auto",
         "command",

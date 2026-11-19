@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { marshalServers, pickServer, readConfig } from '../hooks/config'
-import { buildCell, changes, plainText, prLabel, prsFrom, resultJson, serverUrl, statusLine, webBase } from '../hooks/fleet-model'
+import { buildCell, changes, plainText, prLabel, prsFrom, resultJson, savedAnswerPath, serverUrl, statusLine, webBase } from '../hooks/fleet-model'
 import { formatAudit, formatCost, formatPorts, formatRequests, pendingCount, tabSpec } from '../hooks/space-model'
 import { ATTENTION, LIST } from './fixtures'
 
@@ -173,5 +173,18 @@ describe('pull requests', () => {
     ])
     expect(prs[0]?.url).toBe('https://github.com/acme/app/pull/12')
     expect(prsFrom(null)).toEqual([])
+  })
+})
+
+describe('savedAnswerPath', () => {
+  const note = (path: string) => ({ content: [{ type: 'text', text: `Error: result (61,820 characters across 1 line) exceeds maximum allowed tokens. Output has been saved to ${path}.\nFormat: Plain text` }], isError: false })
+  test('finds the file Claude Code saved an oversized answer to', () => {
+    expect(savedAnswerPath(note('/home/agent/.claude/projects/p/s/tool-results/mcp-x-spaces_audit-1.txt'))).toBe('/home/agent/.claude/projects/p/s/tool-results/mcp-x-spaces_audit-1.txt')
+  })
+  test('takes only a tool-results file, never another path', () => {
+    expect(savedAnswerPath(note('/etc/passwd'))).toBeUndefined()
+    expect(savedAnswerPath(note('/home/agent/.ssh/tool-results/../id_rsa.txt'))).toBeUndefined()
+    expect(savedAnswerPath({ content: [{ type: 'text', text: '[{"a":1}]' }], isError: false })).toBeUndefined()
+    expect(savedAnswerPath({ ...note('/x/tool-results/a.txt'), isError: true })).toBeUndefined()
   })
 })

@@ -24,7 +24,7 @@ export function readConfig(options: PluginOptions): Config {
     url: String(options.url ?? '').trim(),
     server: String(options.server ?? '').trim(),
     fleet: mode(options.fleet, 'command'),
-    space: mode(options.space, 'auto'),
+    space: mode(options.space, 'command'),
     // Never faster than every 5 seconds: each poll is two MCP calls.
     pollMs: Math.max(5, Number.isFinite(seconds) ? seconds : 20) * 1000,
     notify: options.notify !== false,

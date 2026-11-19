@@ -24,6 +24,20 @@ export function resultJson(result: { content: readonly unknown[]; isError: boole
   }
 }
 
+// Claude Code does not hand over an MCP answer over its token limit: the text
+// is a note that names the file it saved the answer to. A busy space's audit
+// answer (200 events, about 60 KB) is over it. Only Claude Code's own
+// tool-results files are taken, so a server cannot point the plugin at any
+// other file.
+const SAVED_NOTE = /^Error: result \([^)]*\) exceeds maximum allowed tokens\. Output has been saved to (\/\S+\/tool-results\/[^/\s]+\.txt)\.?\s/
+export function savedAnswerPath(result: { content: readonly unknown[]; isError: boolean }): string | undefined {
+  if (result.isError) return undefined
+  const first = result.content[0]
+  const text = first && typeof first === 'object' && (first as { type?: string }).type === 'text' ? String((first as { text?: unknown }).text ?? '') : ''
+  const m = SAVED_NOTE.exec(text)
+  return m && !m[1]!.includes('/../') ? m[1] : undefined
+}
+
 // Marshal cuts an answer over its size cap and ends it with
 // "[truncated: N bytes omitted]". A list answer is newest first, so the
 // complete items before the cut are the ones worth showing.
