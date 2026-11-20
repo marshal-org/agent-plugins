@@ -36,10 +36,11 @@ export async function findCell($: EngineInterface): Promise<Cell | undefined> {
     return undefined
   }
   mod.problem = ''
-  // The address the person set is the web app's too; else the MCP config's.
-  // Not inside a space: there the url is only the default (Marshal cloud),
-  // and the space reads its own server.
-  let webUrl = mod.inSpace ? '' : webBase(mod.config.url)
+  // Links go to the web app of the server the panes read. The url setting is
+  // that address only when the panes read the plugin's own server; any other
+  // server's address is in Claude Code's MCP config. (The url defaults to
+  // Marshal cloud, so using it for another server sent every link there.)
+  let webUrl = !mod.inSpace && server === OWN_SERVER ? webBase(mod.config.url) : ''
   if (!webUrl) {
     try {
       const home = await $.env.get('HOME')

@@ -17,7 +17,7 @@ const TOOLS = ['Bash', 'mcp__marshal-example__runs_attention', 'mcp__marshal-exa
 type Call = { server: string; tool: string; args: Record<string, unknown> }
 
 // The engine beneath the plugin: tools, MCP answers, the panes, the screen.
-function world(on: On, opts: { inSpace: boolean; mcp: (c: Call) => unknown | Promise<unknown>; tools?: string[]; files?: Record<string, string> }) {
+function world(on: On, opts: { inSpace: boolean; mcp: (c: Call) => unknown | Promise<unknown>; tools?: string[]; files?: Record<string, string>; home?: string }) {
   const calls: Call[] = []
   const opened: string[] = []
   const reads: string[] = []
@@ -30,7 +30,7 @@ function world(on: On, opts: { inSpace: boolean; mcp: (c: Call) => unknown | Pro
     return { value: (await opts.mcp(e)) as never }
   })
   on('fs.stat', () => (opts.inSpace ? { value: { kind: 'other', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
-  on('env.get', () => ({ value: undefined }))
+  on('env.get', (_, e) => ({ value: e.name === 'HOME' ? opts.home : undefined }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('ui.open', (_, e) => {
     opened.push(e.id)
@@ -329,4 +329,19 @@ test('inside a space the plugin never reads its own server, only the space one',
   await w.clock.advance(3500)
   expect(w.calls.length).toBeGreaterThan(0)
   expect(w.calls.every(c => c.server === 'marshal-orchestration')).toBe(true)
+})
+
+test('run links go to the web app of the server the panes read, not the default url', async ($, on) => {
+  const w = world(on, {
+    inSpace: false,
+    mcp: fleetMcp,
+    home: '/h',
+    files: { '/h/.claude.json': JSON.stringify({ mcpServers: { 'marshal-example': { type: 'http', url: 'https://marshal.example.com/mcp' } } }) },
+  })
+  await $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
+  await w.clock.advance(3500)
+  const ui = await $.ui.mount({ ...FLEET, surface: 'desktop' })
+  const link = await ui.find({ type: 'Link' })
+  expect(String(link?.props.href)).toMatch(/^https:\/\/marshal\.example\.com\/runs\//)
+  await ui.unmount()
 })
