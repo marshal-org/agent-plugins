@@ -115,14 +115,14 @@ test('a new ask between polls raises a toast', async ($, on) => {
   expect(w.toasts.some(t => t.includes('shipper asks: Merge PR #12?'))).toBe(true)
 })
 
-test('not signed in yet: the pane says how to sign in or set your own address', async ($, on) => {
+test('not connected yet: the pane points to the install command', async ($, on) => {
   const w = world(on, { inSpace: false, mcp: fleetMcp, tools: ['Bash'] })
   await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
   await w.clock.advance(3500)
   const ui = await $.ui.mount({ ...FLEET, surface: 'terminal' })
-  // The url defaults to Marshal cloud, so the pane asks to sign in, and says
-  // how to point it at your own Marshal.
-  expect(await ui.find({ type: 'Text', text: /sign in \(https:\/\/app\.marshal\.codes\/mcp\).*plugin configure marshal/ })).toBeDefined()
+  // The url is still the placeholder default, so it counts as not set.
+  expect(await ui.find({ type: 'Text', text: /install command from Connect an agent/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /marshal\.invalid/ })).toBeUndefined()
   await ui.unmount()
 })
 

@@ -41,8 +41,9 @@ Then in Claude Code: `/mcp`, pick `plugin:marshal:marshal`, sign in. Your org mu
 turned on. Then `/marshal-fleet` opens the pane beside the transcript (fullscreen terminal) or inline.
 
 The `url` setting is the address of the plugin's own MCP server (`.mcp.json`), so each customer's
-internal domain works. It defaults to Marshal cloud (`https://app.marshal.codes/mcp`); on your own
-Marshal, set its address. Already added Marshal with `claude mcp add`? Set `url` to the same address
+internal domain works. The Marshal web app's Connect an agent card gives the command above with your
+address filled in. Until it is set, `url` holds a placeholder (`https://marshal.invalid/mcp`, which never
+resolves) and the panes say how to connect. Already added Marshal with `claude mcp add`? Set `url` to the same address
 and Claude Code keeps one server, not two. Inside a space the plugin always reads the space's own
 Marshal server (`marshal-orchestration`), whatever `url` holds.
 

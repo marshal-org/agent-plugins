@@ -31,8 +31,8 @@ export async function findCell($: EngineInterface): Promise<Cell | undefined> {
     mod.problem = mod.config.server
       ? `The Marshal server "${mod.config.server}" is not connected. Check /mcp.`
       : mod.config.url
-        ? `Marshal is not signed in yet. Run /mcp, pick plugin:marshal:marshal and sign in (${mod.config.url}). On your own Marshal, first set its address with /plugin configure marshal.`
-        : 'Marshal is not connected. Set your Marshal MCP address with /plugin configure marshal (Connect an agent in the Marshal web app shows it), or run: claude mcp add --transport http marshal https://<your-marshal>/mcp'
+        ? `Marshal is not signed in yet. Run /mcp, pick plugin:marshal:marshal and sign in (${mod.config.url}).`
+        : 'Marshal is not connected yet. Copy the install command from Connect an agent in your Marshal web app and run it, then sign in with /mcp. Or set the address with /plugin configure marshal.'
     return undefined
   }
   mod.problem = ''

@@ -4,8 +4,7 @@ export type Mode = 'auto' | 'command' | 'off'
 
 export type Config = {
   // The Marshal MCP address the plugin's own server connects to (.mcp.json).
-  // Defaults to Marshal cloud, so the server's config is never invalid (an
-  // empty url is a plugin error in /plugin, even inside a space).
+  // Empty while it is the placeholder default (PLACEHOLDER_URL).
   url: string
   // The MCP server name the person chose; empty means the first Marshal server.
   server: string
@@ -19,10 +18,25 @@ function mode(v: unknown, fallback: Mode): Mode {
   return v === 'auto' || v === 'command' || v === 'off' ? v : fallback
 }
 
+// The url's default: a valid address that never resolves (.invalid is
+// reserved). An empty url makes the plugin's MCP server config invalid, which
+// /plugin shows as a plugin error, even inside a space where the server is
+// never used. Every real setup sets its own address (the Connect an agent
+// install command does).
+export const PLACEHOLDER_URL = 'https://marshal.invalid/mcp'
+
+function realUrl(url: string): string {
+  try {
+    return new URL(url).hostname.endsWith('.invalid') ? '' : url
+  } catch {
+    return url
+  }
+}
+
 export function readConfig(options: PluginOptions): Config {
   const seconds = Number(options.pollSeconds ?? 20)
   return {
-    url: String(options.url ?? '').trim(),
+    url: realUrl(String(options.url ?? '').trim()),
     server: String(options.server ?? '').trim(),
     fleet: mode(options.fleet, 'command'),
     space: mode(options.space, 'command'),

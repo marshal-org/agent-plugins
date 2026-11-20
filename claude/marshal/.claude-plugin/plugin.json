@@ -1,6 +1,6 @@
 {
   "name": "marshal",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Marshal in Claude Code: delegate work to Marshal runs, watch your fleet of deputy runs in a live pane and answer what needs you, and inspect the space you work in.",
   "author": {
     "name": "Marshal",
@@ -13,8 +13,8 @@
     "url": {
       "type": "string",
       "title": "Marshal MCP address",
-      "description": "Your Marshal MCP address, as the Marshal web app shows it under Connect an agent. The default is Marshal cloud (https://app.marshal.codes/mcp); on your own Marshal, set its address, for example https://marshal.example.com/mcp. Run /mcp once to sign in. Inside a Marshal space the plugin uses the space's own Marshal server instead.",
-      "default": "https://app.marshal.codes/mcp"
+      "description": "Your Marshal MCP address, for example https://marshal.example.com/mcp. The install command under Connect an agent in your Marshal web app sets it. Run /mcp once to sign in. Inside a Marshal space the plugin uses the space's own Marshal server.",
+      "default": "https://marshal.invalid/mcp"
     },
     "server": {
       "type": "string",
