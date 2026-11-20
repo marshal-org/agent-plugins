@@ -125,6 +125,7 @@ export function buildCell(
   webUrl: string,
   attention: unknown,
   list: unknown,
+  launchedOnly = false,
 ): FleetCell {
   const att = obj(attention)
   const asks = arr(att.asks).map(toAsk).filter(a => a.askId !== '')
@@ -140,6 +141,7 @@ export function buildCell(
     active: runs.filter(r => ACTIVE_STATES.includes(r.state)),
     recent: runs.filter(r => RECENT_STATES.has(r.state)).slice(0, RECENT_MAX),
     error: '',
+    ...(launchedOnly && { launchedOnly }),
   }
 }
 

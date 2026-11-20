@@ -18,7 +18,7 @@ export async function callJson($: EngineInterface, server: string, tool: string,
 }
 
 // hasPrs: the server lists runs_prs (older servers do not; no PRs then).
-export type Cell = { server: string; webUrl: string; hasPrs?: boolean; hasSpaceReads?: boolean }
+export type Cell = { server: string; webUrl: string; hasPrs?: boolean; hasSpaceReads?: boolean; hasAttention?: boolean }
 
 // PRs per run, kept between polls: a run's PRs change while it runs and until
 // they are merged or closed, so those are read again after a while.
@@ -58,11 +58,14 @@ const LIST_LIMIT = 30
 // Read one cell: what needs a person, and the newest runs.
 export async function readCell($: EngineInterface, cell: Cell): Promise<FleetCell> {
   try {
+    // A space's marshal-orchestration has no runs_attention: its runs_list
+    // holds only the runs this space launched, and nothing waits on a person.
+    const launchedOnly = cell.hasAttention === false
     const [attention, list] = await Promise.all([
-      $.mcp.call(cell.server, 'runs_attention', { minutes: ATTENTION_MINUTES }),
+      launchedOnly ? undefined : $.mcp.call(cell.server, 'runs_attention', { minutes: ATTENTION_MINUTES }),
       $.mcp.call(cell.server, 'runs_list', { limit: LIST_LIMIT, task_chars: -1 }),
     ])
-    const built = buildCell(cell.server, false, cell.webUrl, resultJson(attention), resultJson(list))
+    const built = buildCell(cell.server, false, cell.webUrl, attention ? resultJson(attention) : {}, resultJson(list), launchedOnly)
     return cell.hasPrs ? await attachPrs($, cell.server, built) : built
   } catch (err) {
     return errorCell(cell.server, false, cell.webUrl, err instanceof Error ? err.message : String(err))

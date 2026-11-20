@@ -3,8 +3,9 @@ import type { PluginOptions } from 'claude-code'
 export type Mode = 'auto' | 'command' | 'off'
 
 export type Config = {
-  // The Marshal MCP address the plugin's own server connects to (.mcp.json);
-  // empty when the person added Marshal with claude mcp add instead.
+  // The Marshal MCP address the plugin's own server connects to (.mcp.json).
+  // Defaults to Marshal cloud, so the server's config is never invalid (an
+  // empty url is a plugin error in /plugin, even inside a space).
   url: string
   // The MCP server name the person chose; empty means the first Marshal server.
   server: string

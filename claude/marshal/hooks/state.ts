@@ -1,6 +1,6 @@
 import type { EngineInterface } from 'claude-code'
 
-import { marshalServers, pickServer, readConfig, toolsOf, type Config } from './config'
+import { marshalServers, OWN_SERVER, pickServer, readConfig, toolsOf, type Config } from './config'
 import { serverUrl, webBase } from './fleet-model'
 import { pollFleet, type Cell } from './fleet-poll'
 import { pollInspector } from './space-poll'
@@ -12,6 +12,8 @@ export const mod = {
   cell: undefined as Cell | undefined,
   problem: '',
   inSpace: false,
+  // Inside a space the fleet is read only after /marshal-fleet opened it.
+  fleetOpened: false,
   isPolling: false,
   // A poll asked for while one runs (a tab change, an answer): run once more
   // after it, so the new tab is read instead of staying on "Reading...".
@@ -21,18 +23,23 @@ export const mod = {
 
 export async function findCell($: EngineInterface): Promise<Cell | undefined> {
   const names = (await $.tool.list()).map(t => t.name)
-  const server = pickServer(mod.config, marshalServers(names))
+  // Inside a space the plugin's own server (the default url, Marshal cloud) is
+  // never the one to read: the space's own Marshal server is.
+  const found = marshalServers(names).filter(s => !mod.inSpace || s !== OWN_SERVER)
+  const server = pickServer(mod.config, found)
   if (!server) {
     mod.problem = mod.config.server
       ? `The Marshal server "${mod.config.server}" is not connected. Check /mcp.`
       : mod.config.url
-        ? 'Marshal is not signed in yet. Run /mcp, pick plugin:marshal:marshal and sign in.'
+        ? `Marshal is not signed in yet. Run /mcp, pick plugin:marshal:marshal and sign in (${mod.config.url}). On your own Marshal, first set its address with /plugin configure marshal.`
         : 'Marshal is not connected. Set your Marshal MCP address with /plugin configure marshal (Connect an agent in the Marshal web app shows it), or run: claude mcp add --transport http marshal https://<your-marshal>/mcp'
     return undefined
   }
   mod.problem = ''
   // The address the person set is the web app's too; else the MCP config's.
-  let webUrl = webBase(mod.config.url)
+  // Not inside a space: there the url is only the default (Marshal cloud),
+  // and the space reads its own server.
+  let webUrl = mod.inSpace ? '' : webBase(mod.config.url)
   if (!webUrl) {
     try {
       const home = await $.env.get('HOME')
@@ -42,7 +49,7 @@ export async function findCell($: EngineInterface): Promise<Cell | undefined> {
     }
   }
   const tools = toolsOf(server, names)
-  return { server, webUrl, hasPrs: tools.has('runs_prs'), hasSpaceReads: tools.has('spaces_usage') && tools.has('spaces_changes') }
+  return { server, webUrl, hasPrs: tools.has('runs_prs'), hasAttention: tools.has('runs_attention'), hasSpaceReads: tools.has('spaces_usage') && tools.has('spaces_changes') }
 }
 
 export async function poll($: EngineInterface): Promise<void> {
@@ -60,8 +67,13 @@ export async function poll($: EngineInterface): Promise<void> {
           $.ui.status(undefined)
           return
         }
-        if (mod.inSpace) await pollInspector($, mod.cell.server, mod.cell.hasSpaceReads === true)
-        else await pollFleet($, [mod.cell], mod.config.notify)
+        if (!mod.inSpace) await pollFleet($, [mod.cell], mod.config.notify)
+        else {
+          // No desktop to notify in a space; the inspector reads last so the
+          // status line stays the space's own.
+          if (mod.fleetOpened) await pollFleet($, [mod.cell], false)
+          if (mod.config.space !== 'off') await pollInspector($, mod.cell.server, mod.cell.hasSpaceReads === true)
+        }
         mod.problem = ''
       } catch (err) {
         mod.problem = err instanceof Error ? err.message : String(err)

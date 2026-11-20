@@ -19,8 +19,8 @@ One plugin, `marshal`, in `claude/marshal/`:
 | Part | Where it works | What it does |
 |---|---|---|
 | Skills `delegate`, `inbox`, `debug-run`, `suggest-stack` | Anywhere the Marshal MCP is connected | Teach Claude to hand a task to a Marshal run, triage what waits on you, find why a run failed, and build the org's first stack and manifests from your repositories |
-| Fleet pane `/marshal-fleet` | Claude Code on a laptop | Your runs on one Marshal cell: what needs you (answer with a press), failed or parked, running, recently ended. Status line, toasts, a desktop notification on a new ask |
-| Space inspector `/marshal-space` | Claude Code inside a Marshal space | The space's own overview, audit, requests, reviews, ports, changes and cost. Read only |
+| Fleet pane `/marshal-fleet` | Claude Code on a laptop, or inside a space with `marshal-orchestration` | Your runs on one Marshal cell: what needs you (answer with a press), failed or parked, running, recently ended. Status line, toasts, a desktop notification on a new ask |
+| Space inspector `/marshal-space` | Claude Code inside a Marshal space (elsewhere the command says so) | The space's own overview, audit, requests, reviews, ports, changes and cost. Read only |
 
 The panes are a Claude Code mod: a TypeScript hooks module (`hooks/register.tsx`) that draws
 with `ui.render` and reads Marshal through the MCP server Claude Code already has
@@ -41,8 +41,10 @@ Then in Claude Code: `/mcp`, pick `plugin:marshal:marshal`, sign in. Your org mu
 turned on. Then `/marshal-fleet` opens the pane beside the transcript (fullscreen terminal) or inline.
 
 The `url` setting is the address of the plugin's own MCP server (`.mcp.json`), so each customer's
-internal domain works. Already added Marshal with `claude mcp add`? Leave `url` empty and the plugin
-reads that server; set it to the same address and Claude Code keeps one server, not two.
+internal domain works. It defaults to Marshal cloud (`https://app.marshal.codes/mcp`); on your own
+Marshal, set its address. Already added Marshal with `claude mcp add`? Set `url` to the same address
+and Claude Code keeps one server, not two. Inside a space the plugin always reads the space's own
+Marshal server (`marshal-orchestration`), whatever `url` holds.
 
 From this repo while it is internal: `claude plugin marketplace add ./apps/agent-plugins`, then
 `claude plugin install marshal@marshal --config url=...`.
@@ -69,6 +71,11 @@ it). It reads the space through the Marshal MCP that the `marshal-orchestration`
 into the agent (server name `marshal-orchestration`), using its read-only `inspect_self`
 capability: `space: "self"`, `space_id: "self"` and `run_id: "self"` resolve server side to the
 credential's own space and run. The capability is on by default (marshal-orchestration 1.0.6); a stack that lists its own tools without it turns it off.
+
+`/marshal-fleet` works in a space too: it reads runs through the same `marshal-orchestration`
+server, with what that server's credential may see. It is read only after you open it, and it
+sends no desktop notifications there. Outside a space, `/marshal-space` answers that it works
+only inside a space.
 
 It is read only, on purpose. The agent shares the container with the person, so any button
 the person can press there, the agent can press too. Approving a network request or a policy

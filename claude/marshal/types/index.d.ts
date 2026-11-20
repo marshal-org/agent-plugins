@@ -36,6 +36,9 @@ export type FleetCell = {
   // The web app's base URL, for links; empty when unknown.
   webUrl: string
   asks: FleetAsk[]
+  // True when the server lists only the runs this space launched (a space's
+  // marshal-orchestration has no runs_attention): no asks, no attention.
+  launchedOnly?: boolean
   // Parked runs, and runs that failed or timed out in the window.
   attention: FleetRun[]
   // Runs still going: pending, running, awaiting_human, engaged.

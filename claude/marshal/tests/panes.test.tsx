@@ -115,12 +115,14 @@ test('a new ask between polls raises a toast', async ($, on) => {
   expect(w.toasts.some(t => t.includes('shipper asks: Merge PR #12?'))).toBe(true)
 })
 
-test('no Marshal server: the pane says how to add one', async ($, on) => {
+test('not signed in yet: the pane says how to sign in or set your own address', async ($, on) => {
   const w = world(on, { inSpace: false, mcp: fleetMcp, tools: ['Bash'] })
   await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
   await w.clock.advance(3500)
   const ui = await $.ui.mount({ ...FLEET, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /plugin configure marshal/ })).toBeDefined()
+  // The url defaults to Marshal cloud, so the pane asks to sign in, and says
+  // how to point it at your own Marshal.
+  expect(await ui.find({ type: 'Text', text: /sign in \(https:\/\/app\.marshal\.codes\/mcp\).*plugin configure marshal/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -288,4 +290,43 @@ test('an audit answer over the Claude Code token limit is read from the file it 
   expect(await ui.find({ type: 'Text', text: /big\.example.*DENIED/ })).toBeDefined()
   expect(w.reads).toEqual([saved])
   await ui.unmount()
+})
+
+test('on a laptop /marshal-space says it works only inside a space', async ($, on) => {
+  const w = world(on, { inSpace: false, mcp: fleetMcp })
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  const out = await $.command.run({ command: 'marshal-space', args: '' } as Parameters<typeof $.command.run>[0])
+  expect(JSON.stringify(out)).toContain('works only inside a Marshal space')
+  expect(w.opened).toEqual([])
+})
+
+test('inside a space /marshal-fleet lists the runs this space launched', async ($, on) => {
+  // A space's marshal-orchestration: run tools, but no runs_attention or inbox_answer.
+  const tools = ['Bash', 'mcp__marshal-orchestration__runs_get', 'mcp__marshal-orchestration__runs_list', 'mcp__marshal-orchestration__spaces_get']
+  const w = world(on, { inSpace: true, tools, mcp: c => (c.tool === 'runs_list' ? fleetMcp(c) : spaceMcp(c)) })
+  await $.session.start({ cwd: '/home/agent', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(3500)
+  // Not read until opened: the inspector's reads only.
+  expect(w.calls.some(c => c.tool === 'runs_list')).toBe(false)
+
+  await $.command.run({ command: 'marshal-fleet', args: '' } as Parameters<typeof $.command.run>[0])
+  await w.clock.advance(100)
+  expect(w.opened).toEqual(['marshal-fleet'])
+  const ui = await $.ui.mount({ ...FLEET, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Runs this space launched/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /NEEDS YOU/ })).toBeUndefined()
+  await ui.unmount()
+  expect(w.calls.some(c => c.tool === 'runs_attention' || c.tool === 'inbox_answer')).toBe(false)
+  // The status line stays the space's own.
+  expect(w.status.at(-1)).toBe('checkout-fix · running · ◆ 1 request pending')
+})
+
+test('inside a space the plugin never reads its own server, only the space one', async ($, on) => {
+  // The plugin's own server listed first (signed in through the default url).
+  const tools = ['mcp__plugin_marshal_marshal__runs_get', 'mcp__plugin_marshal_marshal__runs_attention', 'mcp__marshal-orchestration__runs_get', 'mcp__marshal-orchestration__spaces_get']
+  const w = world(on, { inSpace: true, tools, mcp: spaceMcp })
+  await $.session.start({ cwd: '/home/agent', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(3500)
+  expect(w.calls.length).toBeGreaterThan(0)
+  expect(w.calls.every(c => c.server === 'marshal-orchestration')).toBe(true)
 })

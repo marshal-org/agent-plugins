@@ -275,7 +275,12 @@ export async function renderFleet($: EngineInterface, kit: Kit, width: number, p
         <Box key={`cell:${cell.server}`} flexDirection="column">
           {fleet.cells.length > 1 && section(kit, inner, cellName(cell.server), cell.active.length)}
           {cell.error !== '' && notice(kit, `Cannot read ${cell.server}: ${cut(cell.error, 300)}`, 'error')}
-          {cell.asks.length === 0 && cell.attention.length === 0 && cell.error === '' && (
+          {cell.launchedOnly && cell.error === '' && (
+            <Box marginTop={1} paddingX={1}>
+              <Text dimColor wrap="wrap">Runs this space launched. Your other runs and what needs you are in /marshal-fleet on your laptop or in the web app.</Text>
+            </Box>
+          )}
+          {!cell.launchedOnly && cell.asks.length === 0 && cell.attention.length === 0 && cell.error === '' && (
             <Box marginTop={1} paddingX={1}>
               <Text color="success">✓ Nothing needs you.</Text>
             </Box>
