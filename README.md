@@ -31,11 +31,16 @@ Spec and decisions: [`docs/specs/feat-claude-plugin/`](../../docs/specs/feat-cla
 ## Install (laptop)
 
 One command, with your own Marshal's MCP address (the Marshal web app shows this exact command, filled
-in, under **Connect an agent**):
+in, under **Connect an agent**). Run it again to upgrade: `install` does nothing when the plugin is
+there, and `update` refreshes the marketplace and moves to the latest version (restart Claude Code to load it).
 
 ```
-claude plugin install marshal --marketplace marshal-org/agent-plugins --config url=https://<your-marshal>/mcp
+claude plugin install marshal --marketplace marshal-org/agent-plugins --config url=https://<your-marshal>/mcp && claude plugin update marshal@marshal
 ```
+
+`Cannot add marketplace "marshal": its source doesn't match`? You added the `marshal` marketplace
+earlier from another source (a branch or a local folder). Run `claude plugin marketplace remove marshal`
+once, then the command above.
 
 Then in Claude Code: `/mcp`, pick `plugin:marshal:marshal`, sign in. Your org must have MCP access
 turned on. Then `/marshal-fleet` opens the pane beside the transcript (fullscreen terminal) or inline.
