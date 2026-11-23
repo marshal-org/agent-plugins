@@ -1,10 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { Answering, FleetAsk, FleetCell, FleetPr, FleetRun } from '../types'
+import type { Answering, FleetAsk, FleetCell, FleetPr, FleetQueued, FleetRun } from '../types'
 import { EMPTY_FLEET, type Kit } from './atoms'
 import { age, cut, prLabel, runUrl, totals } from './fleet-model'
-import { answerAsk } from './fleet-poll'
+import { answerAsk, clearRun } from './fleet-poll'
 import { mod, poll } from './state'
 
 const fleetAtom = atom({ plugin: 'marshal', key: 'fleet' } as const, EMPTY_FLEET, { shape: 'fleet-1' })
@@ -105,6 +105,7 @@ function header($: EngineInterface, kit: Kit, cell: FleetCell | undefined, t: Re
       <Box flexDirection="row" gap={3} flexWrap="wrap">
         {stat(kit, 'st:asks', '◆', t.asks, 'need you', 'warning')}
         {stat(kit, 'st:active', '●', t.active, 'running', 'success')}
+        {t.queued > 0 && stat(kit, 'st:queued', '◌', t.queued, 'queued', 'suggestion')}
         {stat(kit, 'st:attention', '✕', t.attention, 'failed or parked', 'error')}
       </Box>
       <Text dimColor>updated {updated} ago</Text>
@@ -141,9 +142,10 @@ function prChips(kit: Kit, runId: string, prs: readonly FleetPr[]) {
 }
 
 // A run: glyph, title (a link to the run page), age; the deputy and why it
-// stopped under it; the full task, id and times revealed on hover.
-function runRow(kit: Kit, now: number, cell: FleetCell, r: FleetRun) {
-  const { Box, Text, Link } = kit
+// stopped under it; the full task, id and times revealed on hover. A failed
+// run (not a parked one, which still waits on something) can be cleared.
+function runRow($: EngineInterface, kit: Kit, now: number, cell: FleetCell, r: FleetRun, canClear = false) {
+  const { Box, Text, Link, Button } = kit
   const l = look(r.state)
   const href = runUrl(cell, r.id)
   // The glyph already says running or succeeded; other states are spelled out.
@@ -171,6 +173,11 @@ function runRow(kit: Kit, now: number, cell: FleetCell, r: FleetRun) {
         <Box flexShrink={0}>
           <Text dimColor>{age(r.completedAt || r.createdAt, now).padStart(3)}</Text>
         </Box>
+        {canClear && r.state !== 'parked' && (
+          <Box flexShrink={0}>
+            <Button key={`clear:${r.id}`} label="Clear" plain dimColor onPress={() => clearRun($, cell.server, r.id)} />
+          </Box>
+        )}
       </Box>
       {r.prs !== undefined && r.prs.length > 0 && prChips(kit, r.id, r.prs)}
       {meta !== '' && (
@@ -185,11 +192,57 @@ function runRow(kit: Kit, now: number, cell: FleetCell, r: FleetRun) {
           {cut(r.title, 400)}
         </Text>
         <Text dimColor>
-          run {r.id.slice(0, 8)} · started {age(r.createdAt, now)} ago{r.completedAt ? ` · ended ${age(r.completedAt, now)} ago` : ''}
+          {[
+            `run ${r.id.slice(0, 8)}`,
+            r.createdAt ? `started ${age(r.createdAt, now)} ago` : '',
+            r.completedAt ? `ended ${age(r.completedAt, now)} ago` : '',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
         </Text>
       </Box>
     </Box>
   )
+}
+
+// A launch waiting for a concurrency limit: not a run yet, so no link. Why
+// it waits goes under the title; the server's reason already names its place.
+function queuedRow(kit: Kit, now: number, q: FleetQueued) {
+  const { Box, Text } = kit
+  const meta = q.reason || (q.position > 0 ? `#${q.position} in queue` : '')
+  return (
+    <Box key={`queued:${q.id}`} flexDirection="column" paddingX={1}>
+      <Box flexDirection="row" gap={1}>
+        <Text dimColor>◌</Text>
+        <Box flexGrow={1} flexShrink={1}>
+          <Text wrap="truncate-end">{q.title}</Text>
+        </Box>
+        {q.deputy !== '' && (
+          <Box flexShrink={0}>
+            <Text color="suggestion" dimColor wrap="truncate-end">
+              {cut(q.deputy, 16)}
+            </Text>
+          </Box>
+        )}
+        <Box flexShrink={0}>
+          <Text dimColor>{age(q.createdAt, now).padStart(3)}</Text>
+        </Box>
+      </Box>
+      {meta !== '' && (
+        <Box paddingLeft={2}>
+          <Text dimColor wrap="truncate-end">
+            {meta}
+          </Text>
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+// Which run asks: its title and short id, so the person knows the context.
+export function askSource(a: FleetAsk): string {
+  const id = a.runId.slice(0, 8)
+  return a.runTitle ? `${a.runTitle} · run ${id}` : id ? `run ${id}` : ''
 }
 
 // An ask: an amber card with the question and one button per answer. No
@@ -211,6 +264,11 @@ function askCard($: EngineInterface, kit: Kit, answering: Answering, cell: Fleet
         </Box>
         {href !== '' && Link && <Link href={href}>↗ run</Link>}
       </Box>
+      {askSource(a) !== '' && (
+        <Text dimColor wrap="truncate-end">
+          from {askSource(a)}
+        </Text>
+      )}
       {Markdown ? <Markdown key={`q:${a.askId}`} text={question} /> : <Text wrap="wrap">{flat(question)}</Text>}
       <Box flexDirection="row" gap={1} flexWrap="wrap" marginTop={1}>
         {a.choices.map((c, i) => (
@@ -288,16 +346,18 @@ export async function renderFleet($: EngineInterface, kit: Kit, width: number, p
           {cell.asks.length > 0 && section(kit, inner, 'Needs you', cell.asks.length, 'warning')}
           {cell.asks.map(a => askCard($, kit, answering, cell, a))}
           {cell.attention.length > 0 && section(kit, inner, 'Failed or parked', cell.attention.length, 'error')}
-          {cell.attention.map(r => runRow(kit, now, cell, r))}
+          {cell.attention.map(r => runRow($, kit, now, cell, r, true))}
           {section(kit, inner, 'Running', cell.active.length)}
           {cell.active.length === 0 && (
             <Box paddingX={1}>
               <Text dimColor>No runs right now.</Text>
             </Box>
           )}
-          {cell.active.map(r => runRow(kit, now, cell, r))}
+          {cell.active.map(r => runRow($, kit, now, cell, r))}
+          {cell.queued.length > 0 && section(kit, inner, 'Queued', cell.queued.length)}
+          {cell.queued.map(q => queuedRow(kit, now, q))}
           {cell.recent.length > 0 && section(kit, inner, 'Recently ended', cell.recent.length)}
-          {cell.recent.map(r => runRow(kit, now, cell, r))}
+          {cell.recent.map(r => runRow($, kit, now, cell, r))}
         </Box>
       ))}
       <Box marginTop={1} paddingX={1}>
@@ -319,7 +379,7 @@ export async function renderAskBand($: EngineInterface, kit: Kit, width: number)
   const a = cell?.asks[0]
   if (!cell || !a) return undefined
   const more = fleet.cells.reduce((n, c) => n + c.asks.length, 0) - 1
-  const lead = `◆ ${a.deputy || 'A run'} asks`
+  const lead = `◆ ${a.deputy || 'A run'}${a.runTitle ? ` (${cut(a.runTitle, 40)})` : ''} asks`
   return (
     <Box flexDirection="column">
       <Box flexDirection="row" gap={1}>

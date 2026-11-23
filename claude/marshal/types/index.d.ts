@@ -5,6 +5,21 @@ export type FleetAsk = {
   deputy: string
   question: string
   choices: string[]
+  // The title of the run that asks, so the person knows where the question
+  // comes from; empty until found.
+  runTitle: string
+}
+
+// A deputy launch waiting for a concurrency limit. Not a run yet: no run id.
+export type FleetQueued = {
+  id: string
+  title: string
+  deputy: string
+  // 1 is next; 0 when the server did not say.
+  position: number
+  // Why it waits, as the server words it.
+  reason: string
+  createdAt: string
 }
 
 // A pull request a run opened, pushed to, merged or closed.
@@ -43,6 +58,8 @@ export type FleetCell = {
   attention: FleetRun[]
   // Runs still going: pending, running, awaiting_human, engaged.
   active: FleetRun[]
+  // Launches waiting for a concurrency limit, newest first.
+  queued: FleetQueued[]
   // The newest runs that ended well (succeeded) or were canceled.
   recent: FleetRun[]
   // A short reason when this cell could not be read this time.

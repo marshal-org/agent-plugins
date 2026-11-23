@@ -19,7 +19,7 @@ One plugin, `marshal`, in `claude/marshal/`:
 | Part | Where it works | What it does |
 |---|---|---|
 | Skills `delegate`, `inbox`, `debug-run`, `suggest-stack` | Anywhere the Marshal MCP is connected | Teach Claude to hand a task to a Marshal run, triage what waits on you, find why a run failed, and build the org's first stack and manifests from your repositories |
-| Fleet pane `/marshal-fleet` | Claude Code on a laptop, or inside a space with `marshal-orchestration` | Your runs on one Marshal cell: what needs you (answer with a press), failed or parked, running, recently ended. Status line, toasts, a desktop notification on a new ask |
+| Fleet pane `/marshal-fleet` | Claude Code on a laptop, or inside a space with `marshal-orchestration` | Your runs on one Marshal cell: what needs you (answer with a press), failed or parked, running, queued, recently ended. Status line, toasts, a desktop notification on a new ask |
 | Space inspector `/marshal-space` | Claude Code inside a Marshal space (elsewhere the command says so) | The space's own overview, audit, requests, reviews, ports, changes and cost. Read only |
 
 The panes are a Claude Code mod: a TypeScript hooks module (`hooks/register.tsx`) that draws
@@ -63,10 +63,12 @@ notification on a new ask).
 
 What it shows:
 
-- **Fleet pane** (`/marshal-fleet`): what needs you as cards with answer buttons, failed or parked runs,
-  running and recently ended runs with their pull requests (when the server has `runs_prs`), details on
+- **Fleet pane** (`/marshal-fleet`): what needs you as cards with answer buttons, each naming the run
+  it comes from; failed or parked runs (clear a failed one with its Clear button; the pane remembers it
+  across sessions); running and recently ended runs with their pull requests (when the server has
+  `runs_prs`); launches queued behind a concurrency limit, with their place and reason; details on
   hover, `r` to refresh.
-- **Band above the prompt**: the first open ask, answerable in place. No digit hotkeys on purpose: an
+- **Band above the prompt**: the first open ask and the run it comes from, answerable in place. No digit hotkeys on purpose: an
   answer can merge a PR, so it takes a deliberate click.
 - **Status line and toasts**, and a desktop notification on a new ask.
 

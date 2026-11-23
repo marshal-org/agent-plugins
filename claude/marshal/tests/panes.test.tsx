@@ -17,7 +17,7 @@ const TOOLS = ['Bash', 'mcp__marshal-example__runs_attention', 'mcp__marshal-exa
 type Call = { server: string; tool: string; args: Record<string, unknown> }
 
 // The engine beneath the plugin: tools, MCP answers, the panes, the screen.
-function world(on: On, opts: { inSpace: boolean; mcp: (c: Call) => unknown | Promise<unknown>; tools?: string[]; files?: Record<string, string>; home?: string }) {
+function world(on: On, opts: { inSpace: boolean; mcp: (c: Call) => unknown | Promise<unknown>; tools?: string[]; files?: Record<string, string>; home?: string; store?: Record<string, unknown> }) {
   const calls: Call[] = []
   const opened: string[] = []
   const reads: string[] = []
@@ -51,7 +51,13 @@ function world(on: On, opts: { inSpace: boolean; mcp: (c: Call) => unknown | Pro
   })
   on('ui.notify', () => ({ value: { isSent: true, channel: 'terminal_bell' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
-  return { calls, status, toasts, clock, opened, reads }
+  const store = new Map<string, unknown>(Object.entries(opts.store ?? {}))
+  on('store.get', (_, e) => ({ value: store.get(e.key) }))
+  on('store.set', (_, e) => {
+    store.set(e.key, e.value)
+    return { value: undefined }
+  })
+  return { calls, status, toasts, clock, opened, reads, store }
 }
 
 function fleetMcp(c: Call): unknown {
@@ -82,6 +88,106 @@ test('the fleet pane shows what needs you and answers with a press', async ($, o
   const answer = w.calls.find(c => c.tool === 'inbox_answer')
   expect(answer?.args).toEqual({ ask_id: 'ask-1', answer: 'yes' })
   expect(w.toasts.some(t => t.startsWith('Answered: yes'))).toBe(true)
+  await ui.unmount()
+})
+
+const QUEUE_TOOLS = [...TOOLS, 'mcp__marshal-example__runs_cancel_queued']
+
+const QUEUED = [
+  { kind: 'queued_launch', id: 'q-1', status: 'queued', deputy: 'shipper', mission: 'triage', title: 'Triage #40', created_at: '2026-11-16T09:50:00Z', position: 1, reason: 'Waiting: deputy limit reached, 3 of 3 running, position 1' },
+  { kind: 'queued_launch', id: 'q-old', status: 'expired', deputy: 'shipper', mission: 'triage', title: 'Old launch', created_at: '2026-11-16T08:00:00Z', reason: 'expired' },
+]
+
+test('queued launches show in their own section, and in the counts', async ($, on) => {
+  const w = world(on, {
+    inSpace: false,
+    tools: QUEUE_TOOLS,
+    mcp: c => (c.tool === 'runs_list' ? text({ ...LIST, queued: QUEUED }) : fleetMcp(c)),
+  })
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(3500)
+
+  expect(w.calls.find(c => c.tool === 'runs_list')?.args.include_queued).toBe(true)
+  expect(w.status.at(-1)).toBe('◆ 1 need you · ● 1 running · ◌ 1 queued · ✕ 1 failed or parked')
+  const ui = await $.ui.mount({ ...FLEET, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /QUEUED/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Triage #40/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Waiting: deputy limit reached, 3 of 3 running, position 1$/ })).toBeDefined()
+  // A row that already left the queue is not shown.
+  expect(await ui.find({ type: 'Text', text: /Old launch/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('an older server is not sent include_queued', async ($, on) => {
+  const w = world(on, { inSpace: false, mcp: fleetMcp })
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(3500)
+  expect('include_queued' in (w.calls.find(c => c.tool === 'runs_list')?.args ?? {})).toBe(false)
+})
+
+test('an ask card names the run it comes from', async ($, on) => {
+  const w = world(on, { inSpace: false, mcp: fleetMcp })
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(3500)
+  const ui = await $.ui.mount({ ...FLEET, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /from #12 fix login · run run-1/ })).toBeDefined()
+  await ui.unmount()
+  // Found in the runs list: no extra read.
+  expect(w.calls.some(c => c.tool === 'runs_get')).toBe(false)
+})
+
+test('an ask from a run beyond the newest runs reads its title once', async ($, on) => {
+  const w = world(on, {
+    inSpace: false,
+    mcp: c => {
+      if (c.tool === 'runs_list') return text({ runs: [] })
+      if (c.tool === 'runs_get') return text({ id: 'run-1', state: 'awaiting_human', title: 'Old long task' })
+      return fleetMcp(c)
+    },
+  })
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(3500)
+  await w.clock.advance(20000)
+  const ui = await $.ui.mount({ ...FLEET, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /from Old long task · run run-1/ })).toBeDefined()
+  await ui.unmount()
+  expect(w.calls.filter(c => c.tool === 'runs_get').length).toBe(1)
+})
+
+test('a failed run can be cleared, and stays cleared', async ($, on) => {
+  const w = world(on, { inSpace: false, mcp: fleetMcp })
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(3500)
+  const ui = await $.ui.mount({ ...FLEET, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Broken task/ })).toBeDefined()
+  expect(await ui.find({ key: 'clear:run-failed' } as never)).toBeDefined()
+  await ui.press({ key: 'clear:run-failed' })
+  expect(await ui.find({ type: 'Text', text: /Broken task/ })).toBeUndefined()
+  expect(w.status.at(-1)).toBe('◆ 1 need you · ● 1 running')
+  expect(w.store.get('cleared:marshal-example')).toEqual(['run-failed'])
+  // The next poll still has it failed on the server: the pane keeps it hidden.
+  await w.clock.advance(20000)
+  expect(await ui.find({ type: 'Text', text: /Broken task/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a cleared run stays hidden in a new session', async ($, on) => {
+  const w = world(on, { inSpace: false, mcp: fleetMcp, store: { 'cleared:marshal-example': ['run-failed'] } })
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(3500)
+  expect(w.status.at(-1)).toBe('◆ 1 need you · ● 1 running')
+})
+
+test('a parked run has no Clear button', async ($, on) => {
+  const w = world(on, {
+    inSpace: false,
+    mcp: c => (c.tool === 'runs_attention' ? text({ ...ATTENTION, runs: [{ id: 'run-parked', state: 'parked', title: 'Waits for CI' }] }) : fleetMcp(c)),
+  })
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(3500)
+  const ui = await $.ui.mount({ ...FLEET, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Waits for CI/ })).toBeDefined()
+  expect(await ui.find({ key: 'clear:run-parked' } as never)).toBeUndefined()
   await ui.unmount()
 })
 

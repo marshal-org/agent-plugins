@@ -3,7 +3,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { Answering, Fleet, FleetCell, FleetPr, FleetRun } from '../types'
 import { EMPTY_FLEET } from './atoms'
-import { buildCell, changes, cut, errorCell, prsFrom, resultJson, savedAnswerPath, statusLine } from './fleet-model'
+import { buildCell, changes, cut, errorCell, prsFrom, resultJson, savedAnswerPath, statusLine, toRun } from './fleet-model'
 
 const fleetAtom = atom({ plugin: 'marshal', key: 'fleet' } as const, EMPTY_FLEET, { shape: 'fleet-1' })
 const answeringAtom = atom({ plugin: 'marshal', key: 'answering' } as const, null as Answering)
@@ -18,7 +18,54 @@ export async function callJson($: EngineInterface, server: string, tool: string,
 }
 
 // hasPrs: the server lists runs_prs (older servers do not; no PRs then).
-export type Cell = { server: string; webUrl: string; hasPrs?: boolean; hasSpaceReads?: boolean; hasAttention?: boolean }
+// hasQueue: the server lists runs_cancel_queued, so its runs_list takes
+// include_queued (added before it); an older server refuses the argument.
+export type Cell = { server: string; webUrl: string; hasPrs?: boolean; hasSpaceReads?: boolean; hasAttention?: boolean; hasQueue?: boolean }
+
+// Failed runs the person cleared from the pane, per server, kept across
+// sessions. Marshal has no "seen" mark for a run, so this is the plugin's own.
+const CLEARED_MAX = 200
+
+function clearedKey(server: string): string {
+  return `cleared:${server}`
+}
+
+export async function clearedRuns($: EngineInterface, server: string): Promise<Set<string>> {
+  try {
+    const v = await $.store.get(clearedKey(server))
+    return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+// Clear one failed run from the pane now, and from every later poll.
+export async function clearRun($: EngineInterface, server: string, runId: string): Promise<void> {
+  const kept = [...(await clearedRuns($, server))].filter(id => id !== runId)
+  await $.store.set(clearedKey(server), [...kept, runId].slice(-CLEARED_MAX))
+  await update($, fleetAtom, f => ({
+    ...f,
+    cells: f.cells.map(c => (c.server === server ? { ...c, attention: c.attention.filter(r => r.id !== runId) } : c)),
+  }))
+  $.ui.status(statusLine(await read($, fleetAtom)))
+}
+
+// The title of an asking run that is not among the newest runs, read once.
+const askTitles = new Map<string, string>()
+
+async function attachAskTitles($: EngineInterface, server: string, c: FleetCell): Promise<FleetCell> {
+  const missing = c.asks.filter(a => a.runTitle === '' && a.runId !== '' && !askTitles.has(a.runId))
+  await Promise.all(
+    missing.map(async a => {
+      try {
+        askTitles.set(a.runId, toRun(resultJson(await $.mcp.call(server, 'runs_get', { run_id: a.runId }))).title)
+      } catch {
+        // The card then shows the run id alone.
+      }
+    }),
+  )
+  return { ...c, asks: c.asks.map(a => (a.runTitle === '' ? { ...a, runTitle: askTitles.get(a.runId) ?? '' } : a)) }
+}
 
 // PRs per run, kept between polls: a run's PRs change while it runs and until
 // they are merged or closed, so those are read again after a while.
@@ -61,12 +108,15 @@ export async function readCell($: EngineInterface, cell: Cell): Promise<FleetCel
     // A space's marshal-orchestration has no runs_attention: its runs_list
     // holds only the runs this space launched, and nothing waits on a person.
     const launchedOnly = cell.hasAttention === false
-    const [attention, list] = await Promise.all([
+    const [attention, list, cleared] = await Promise.all([
       launchedOnly ? undefined : $.mcp.call(cell.server, 'runs_attention', { minutes: ATTENTION_MINUTES }),
-      $.mcp.call(cell.server, 'runs_list', { limit: LIST_LIMIT, task_chars: -1 }),
+      $.mcp.call(cell.server, 'runs_list', { limit: LIST_LIMIT, task_chars: -1, ...(cell.hasQueue && { include_queued: true }) }),
+      clearedRuns($, cell.server),
     ])
     const built = buildCell(cell.server, false, cell.webUrl, attention ? resultJson(attention) : {}, resultJson(list), launchedOnly)
-    return cell.hasPrs ? await attachPrs($, cell.server, built) : built
+    const shown = { ...built, attention: built.attention.filter(r => !cleared.has(r.id)) }
+    const titled = await attachAskTitles($, cell.server, shown)
+    return cell.hasPrs ? await attachPrs($, cell.server, titled) : titled
   } catch (err) {
     return errorCell(cell.server, false, cell.webUrl, err instanceof Error ? err.message : String(err))
   }

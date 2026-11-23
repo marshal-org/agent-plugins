@@ -1,7 +1,7 @@
 // Pure logic of the fleet mod: reading Marshal MCP results into the board,
 // and telling what changed between two polls. No engine calls here.
 
-import type { Fleet, FleetAsk, FleetCell, FleetPr, FleetRun } from '../types'
+import type { Fleet, FleetAsk, FleetCell, FleetPr, FleetQueued, FleetRun } from '../types'
 
 export const ACTIVE_STATES = ['pending', 'running', 'awaiting_human', 'engaged']
 const RECENT_STATES = new Set(['succeeded', 'canceled'])
@@ -115,6 +115,22 @@ export function toAsk(v: unknown): FleetAsk {
     deputy: str(a.deputy),
     question: plainText(a.question),
     choices: arr(a.choices).map(c => plainText(c)).filter(c => c !== ''),
+    runTitle: '',
+  }
+}
+
+// A row of runs_list's queued list (include_queued). Rows that already left
+// the queue (expired, cancelled, dropped) are not shown.
+export function toQueued(v: unknown): FleetQueued | undefined {
+  const q = obj(v)
+  if (str(q.status) !== 'queued' || str(q.id) === '') return undefined
+  return {
+    id: str(q.id),
+    title: plainText(q.title) || str(q.mission) || str(q.deputy_name) || str(q.deputy),
+    deputy: str(q.deputy),
+    position: typeof q.position === 'number' ? q.position : 0,
+    reason: plainText(q.reason),
+    createdAt: str(q.created_at),
   }
 }
 
@@ -131,14 +147,20 @@ export function buildCell(
   const asks = arr(att.asks).map(toAsk).filter(a => a.askId !== '')
   const attentionRuns = arr(att.runs).map(toRun).filter(r => r.id !== '')
   const seen = new Set(attentionRuns.map(r => r.id))
-  const runs = arr(obj(list).runs).map(toRun).filter(r => r.id !== '' && !seen.has(r.id))
+  const listed = arr(obj(list).runs).map(toRun).filter(r => r.id !== '')
+  const runs = listed.filter(r => !seen.has(r.id))
+  // The ask names only its run id: take the title from the runs read here.
+  const titles = new Map([...listed, ...attentionRuns].map(r => [r.id, r.title]))
   return {
     server,
     isProd,
     webUrl,
-    asks,
+    asks: asks.map(a => ({ ...a, runTitle: titles.get(a.runId) ?? '' })),
     attention: attentionRuns,
     active: runs.filter(r => ACTIVE_STATES.includes(r.state)),
+    queued: arr(obj(list).queued)
+      .map(toQueued)
+      .filter((q): q is FleetQueued => q !== undefined),
     recent: runs.filter(r => RECENT_STATES.has(r.state)).slice(0, RECENT_MAX),
     error: '',
     ...(launchedOnly && { launchedOnly }),
@@ -146,15 +168,16 @@ export function buildCell(
 }
 
 export function errorCell(server: string, isProd: boolean, webUrl: string, reason: string): FleetCell {
-  return { server, isProd, webUrl, asks: [], attention: [], active: [], recent: [], error: reason }
+  return { server, isProd, webUrl, asks: [], attention: [], active: [], queued: [], recent: [], error: reason }
 }
 
-export type Totals = { cells: number; active: number; asks: number; attention: number; errors: number }
+export type Totals = { cells: number; active: number; queued: number; asks: number; attention: number; errors: number }
 
 export function totals(fleet: Fleet): Totals {
-  const t: Totals = { cells: fleet.cells.length, active: 0, asks: 0, attention: 0, errors: 0 }
+  const t: Totals = { cells: fleet.cells.length, active: 0, queued: 0, asks: 0, attention: 0, errors: 0 }
   for (const c of fleet.cells) {
     t.active += c.active.length
+    t.queued += c.queued.length
     t.asks += c.asks.length
     t.attention += c.attention.length
     if (c.error) t.errors += 1
@@ -171,6 +194,7 @@ export function statusLine(fleet: Fleet): string | undefined {
   const parts: string[] = []
   if (t.asks > 0) parts.push(`◆ ${t.asks} need you`)
   parts.push(`● ${t.active} running`)
+  if (t.queued > 0) parts.push(`◌ ${t.queued} queued`)
   if (t.attention > 0) parts.push(`✕ ${t.attention} failed or parked`)
   if (t.errors > 0) parts.push(`${t.errors} cell${t.errors > 1 ? 's' : ''} unreachable`)
   return parts.join(' · ')

@@ -50,7 +50,7 @@ export async function findCell($: EngineInterface): Promise<Cell | undefined> {
     }
   }
   const tools = toolsOf(server, names)
-  return { server, webUrl, hasPrs: tools.has('runs_prs'), hasAttention: tools.has('runs_attention'), hasSpaceReads: tools.has('spaces_usage') && tools.has('spaces_changes') }
+  return { server, webUrl, hasPrs: tools.has('runs_prs'), hasAttention: tools.has('runs_attention'), hasQueue: tools.has('runs_cancel_queued'), hasSpaceReads: tools.has('spaces_usage') && tools.has('spaces_changes') }
 }
 
 export async function poll($: EngineInterface): Promise<void> {
