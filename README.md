@@ -65,6 +65,21 @@ the panes read, empty = the plugin's own, else the first Marshal server), `fleet
 `command`, opened with `/marshal-space`), `pollSeconds` (default 20, floor 5), `notify` (desktop
 notification on a new ask).
 
+### Claude Desktop
+
+Each release on [`marshal-org/agent-plugins`](https://github.com/marshal-org/agent-plugins/releases)
+carries `marshal-plugin-<version>.zip` and its `.sha256`: the plugin alone, with
+`.claude-plugin/plugin.json` at the archive root.
+
+1. Download the zip from the release (check it against the `.sha256` if you want).
+2. Upload the zip to Claude Desktop as a plugin.
+3. Connect Marshal: point Claude Desktop at your Marshal MCP address (`https://<your-marshal>/mcp`,
+   the plugin's `url` setting) and sign in. Your org must have MCP access turned on.
+
+In Claude Desktop the upload gives you the skills (`delegate`, `inbox`, `debug-run`,
+`suggest-stack`). The panes are a Claude Code mod and run in the Claude Code terminal. The live
+view in Claude Desktop is the fleet card: ask "show my Marshal fleet" (see below).
+
 What it shows:
 
 - **Fleet pane** (`/marshal-fleet`): what needs you as cards with answer buttons, each naming the run
@@ -75,6 +90,11 @@ What it shows:
 - **Band above the prompt**: the first open ask and the run it comes from, answerable in place. No digit hotkeys on purpose: an
   answer can merge a PR, so it takes a deliberate click.
 - **Status line and toasts**, and a desktop notification on a new ask.
+
+Chat apps that show MCP Apps cards (Claude Desktop, for one) get the same fleet as a card in the
+conversation, from the Marshal MCP's `fleet` tool: the same sections, a refresh every 20 seconds
+while it is on screen, and answer buttons. It needs no plugin, only the Marshal MCP connection. A
+client that did not declare card support gets the fleet as text, with a pointer to `/marshal-fleet`.
 
 ## Inside a space
 

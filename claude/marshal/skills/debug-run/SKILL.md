@@ -1,6 +1,6 @@
 ---
 name: debug-run
-description: Find out why a Marshal run failed, timed out, got stuck or produced nothing. Use when the person says "why did this run fail", "debug run <id>", "the deputy is stuck", or after the inbox skill shows a failed run.
+description: Find out why a Marshal run failed, timed out, got stuck or produced nothing. Use when the person says "why did this run fail", "debug this run", "the deputy is stuck", or after the inbox skill shows a failed run.
 ---
 
 # Debug a Marshal run
