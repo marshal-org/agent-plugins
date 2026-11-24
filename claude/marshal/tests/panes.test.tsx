@@ -17,7 +17,7 @@ const TOOLS = ['Bash', 'mcp__marshal-example__runs_attention', 'mcp__marshal-exa
 type Call = { server: string; tool: string; args: Record<string, unknown> }
 
 // The engine beneath the plugin: tools, MCP answers, the panes, the screen.
-function world(on: On, opts: { inSpace: boolean; mcp: (c: Call) => unknown | Promise<unknown>; tools?: string[]; files?: Record<string, string>; home?: string; store?: Record<string, unknown> }) {
+function world(on: On, opts: { inSpace: boolean; mcp: (c: Call) => unknown | Promise<unknown>; tools?: string[]; files?: Record<string, string>; home?: string; store?: Record<string, unknown>; env?: Record<string, string> }) {
   const calls: Call[] = []
   const opened: string[] = []
   const reads: string[] = []
@@ -30,7 +30,9 @@ function world(on: On, opts: { inSpace: boolean; mcp: (c: Call) => unknown | Pro
     return { value: (await opts.mcp(e)) as never }
   })
   on('fs.stat', () => (opts.inSpace ? { value: { kind: 'other', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
-  on('env.get', (_, e) => ({ value: e.name === 'HOME' ? opts.home : undefined }))
+  // A terminal Claude Code draws links in, unless a test says otherwise.
+  const env: Record<string, string | undefined> = { HOME: opts.home, ...(opts.env ?? { TERM_PROGRAM: 'ghostty' }) }
+  on('env.get', (_, e) => ({ value: env[e.name] }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('ui.open', (_, e) => {
     opened.push(e.id)
@@ -490,5 +492,35 @@ test('without a url setting a UUID connector draws no links and no UUID', async 
   expect(await ui.findAll({ type: 'Link' })).toHaveLength(0)
   expect(await ui.find({ type: 'Text', text: new RegExp(UUID_SERVER) })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /shipper asks/ })).toBeDefined()
+  await ui.unmount()
+})
+
+// A terminal Claude Code draws no links in (herdr) would get "text URL" for
+// each Link: the pane draws none, shows the run URL once in full, and says how
+// to turn links on.
+test('in a terminal without links the pane draws plain text and the full run URL', { options: { url: 'https://marshal.example.com/mcp' } }, async ($, on) => {
+  const w = world(on, { inSpace: false, tools: UUID_TOOLS, mcp: fleetMcp, home: '/h', files: { '/h/.claude.json': '{}' }, env: { TERM_PROGRAM: 'herdr', TERM: 'xterm-256color' } })
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(3500)
+  const ui = await $.ui.mount({ ...FLEET, surface: 'terminal' })
+  expect(await ui.findAll({ type: 'Link' })).toHaveLength(0)
+  expect(await ui.find({ type: 'Text', text: /^https:\/\/marshal\.example\.com\/runs\/run-1$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /FORCE_HYPERLINK=1/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /shipper asks/ })).toBeDefined()
+  await ui.unmount()
+  // The desktop app always draws links.
+  const desk = await $.ui.mount({ ...FLEET, surface: 'desktop' })
+  expect((await desk.findAll({ type: 'Link' })).length).toBeGreaterThan(0)
+  expect(await desk.find({ type: 'Text', text: /FORCE_HYPERLINK/ })).toBeUndefined()
+  await desk.unmount()
+})
+
+test('FORCE_HYPERLINK=1 turns links on in herdr', { options: { url: 'https://marshal.example.com/mcp' } }, async ($, on) => {
+  const w = world(on, { inSpace: false, tools: UUID_TOOLS, mcp: fleetMcp, home: '/h', files: { '/h/.claude.json': '{}' }, env: { TERM_PROGRAM: 'herdr', FORCE_HYPERLINK: '1' } })
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(3500)
+  const ui = await $.ui.mount({ ...FLEET, surface: 'terminal' })
+  expect((await ui.findAll({ type: 'Link' })).length).toBeGreaterThan(0)
+  expect(await ui.find({ type: 'Text', text: /FORCE_HYPERLINK/ })).toBeUndefined()
   await ui.unmount()
 })

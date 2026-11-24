@@ -2,17 +2,19 @@ import type { Register } from 'claude-code'
 
 import { FLEET_PANE, INSPECT_PANE, SPACE_SOCKET, type Kit } from './atoms'
 import { readConfig } from './config'
+import { terminalLinks } from './links'
 import { renderAskBand, renderFleet } from './fleet'
 import { renderInspector, renderSpaceBand } from './space'
 import { mod, poll } from './state'
 
-function kitOf(t: Kit): Kit {
+// A terminal Claude Code draws no links in gets no Link: see links.ts.
+function kitOf(t: Kit, surface: string): Kit {
   return {
     Box: t.Box,
     Text: t.Text,
     Button: t.Button,
     ...(t.Input && { Input: t.Input }),
-    ...(t.Link && { Link: t.Link }),
+    ...(t.Link && (surface !== 'terminal' || mod.links) && { Link: t.Link }),
     ...(t.Progress && { Progress: t.Progress }),
     ...(t.Markdown && { Markdown: t.Markdown }),
   }
@@ -26,6 +28,7 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     mod.cwd = e.cwd
+    mod.links = await terminalLinks($)
     mod.inSpace = await $.fs
       .stat(SPACE_SOCKET)
       .then(() => true)
@@ -70,11 +73,11 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: 'marshal-fleet' }, async ($, e) =>
-    renderFleet($, kitOf($.ui.resolve(e) as Kit), e.props.bodyColumns, mod.problem),
+    renderFleet($, kitOf($.ui.resolve(e) as Kit, e.surface), e.props.bodyColumns, mod.problem),
   )
 
   on('ui.render', { component: 'Pane', requestId: 'marshal-space' }, async ($, e) =>
-    renderInspector($, kitOf($.ui.resolve(e) as Kit), e.props.bodyColumns, mod.problem),
+    renderInspector($, kitOf($.ui.resolve(e) as Kit, e.surface), e.props.bodyColumns, mod.problem),
   )
 
   // Above the prompt: an open ask (laptop) or pending requests (in a space),
@@ -82,7 +85,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const mode = mod.inSpace ? mod.config.space : mod.config.fleet
     if (mode === 'off' || e.props.hasSurvey) return next(e)
-    const kit = kitOf($.ui.resolve(e) as Kit)
+    const kit = kitOf($.ui.resolve(e) as Kit, e.surface)
     const tree = mod.inSpace ? await renderSpaceBand($, kit) : await renderAskBand($, kit, e.props.bodyColumns)
     return tree === undefined ? next(e) : (tree as never)
   })

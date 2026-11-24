@@ -3,6 +3,14 @@
 Each release of the `marshal` plugin, newest first. The release on GitHub
 (`marshal-v<version>`) shows the section for its version.
 
+## 0.3.6
+
+- The fleet pane reads well in terminals where Claude Code shows no clickable links, such as
+  herdr: it draws plain text, shows each ask's run address once in full, and says how to turn
+  links on (start Claude Code with `FORCE_HYPERLINK=1`).
+- The ask above the prompt keeps "open run" and its note on one line each: when the row is
+  full, they move below the answer buttons instead of breaking into pieces.
+
 ## 0.3.5
 
 - The plugin uploads to Claude Desktop. Each release carries `marshal-plugin-<version>.zip`,

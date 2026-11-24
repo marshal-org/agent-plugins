@@ -19,6 +19,8 @@ export const mod = {
   // after it, so the new tab is read instead of staying on "Reading...".
   pollAgain: false,
   cwd: '',
+  // Whether Claude Code draws links in this terminal (links.ts).
+  links: true,
 }
 
 export async function findCell($: EngineInterface): Promise<Cell | undefined> {

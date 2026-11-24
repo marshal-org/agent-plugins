@@ -129,6 +129,9 @@ function header($: EngineInterface, kit: Kit, cell: FleetCell | undefined, t: Re
         {stat(kit, 'st:attention', '✕', t.attention, 'failed or parked', 'error')}
       </Box>
       <Text dimColor>updated {updated} ago</Text>
+      {cell?.webUrl && !Link && (
+        <Text dimColor>Links are off in this terminal. To turn them on, start Claude Code with FORCE_HYPERLINK=1.</Text>
+      )}
     </Box>
   )
 }
@@ -316,6 +319,8 @@ function askCard($: EngineInterface, kit: Kit, answering: Answering, cell: Fleet
           from {link(kit, href, askSource(a))}
         </Text>
       )}
+      {/* No links in this terminal: the URL once, in full, so the terminal can still open it. */}
+      {href !== '' && !Link && <Text dimColor>{href}</Text>}
       {Markdown ? <Markdown key={`q:${a.askId}`} text={question} /> : <Text wrap="wrap">{flat(question)}</Text>}
       <Box flexDirection="row" gap={1} flexWrap="wrap" marginTop={1}>
         {a.choices.map((c, i) => (
@@ -439,7 +444,8 @@ export async function renderAskBand($: EngineInterface, kit: Kit, width: number)
           <Text wrap="truncate-end">{cut(flat(a.question || '(no question text)'), Math.max(20, width))}</Text>
         </Box>
       </Box>
-      <Box flexDirection="row" gap={1} paddingLeft={2}>
+      {/* Wraps as a whole: "open run" and the note never shrink into a column of pieces. */}
+      <Box flexDirection="row" gap={1} paddingLeft={2} flexWrap="wrap">
         {a.choices.slice(0, 3).map((c, i) => (
           <Button
             key={`band:${a.askId}:${i}`}
@@ -448,8 +454,12 @@ export async function renderAskBand($: EngineInterface, kit: Kit, width: number)
             onPress={() => sendAnswer($, cell.server, a.askId, c)}
           />
         ))}
-        {href !== '' && Link && <Link href={href}>↗ open run</Link>}
-        <Text dimColor>{more > 0 ? `+${more} more · ` : ''}details in /marshal-fleet</Text>
+        <Box flexDirection="row" gap={1} flexShrink={0}>
+          {href !== '' && Link && <Link href={href}>↗ open run</Link>}
+          <Text dimColor>
+            {more > 0 ? `+${more} more · ` : ''}details in /marshal-fleet
+          </Text>
+        </Box>
       </Box>
     </Box>
   )
