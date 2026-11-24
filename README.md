@@ -18,7 +18,7 @@ One plugin, `marshal`, in `claude/marshal/`:
 
 | Part | Where it works | What it does |
 |---|---|---|
-| Skills `delegate`, `inbox`, `debug-run`, `suggest-stack` | Anywhere the Marshal MCP is connected | Teach Claude to hand a task to a Marshal run, triage what waits on you, find why a run failed, and build the org's first stack and manifests from your repositories |
+| Skills `delegate`, `inbox`, `debug-run`, `improve-deputy`, `suggest-stack` | Anywhere the Marshal MCP is connected | Teach Claude to hand a task to a Marshal run, triage what waits on you, find why a run failed, find where a deputy's runs lose time and money and what to change, and build the org's first stack and manifests from your repositories |
 | Fleet pane `/marshal-fleet` | Claude Code on a laptop, or inside a space with `marshal-orchestration` | Your runs on one Marshal cell: what needs you (answer with a press), failed or parked, running, queued, recently ended. Status line, toasts, a desktop notification on a new ask |
 | Space inspector `/marshal-space` | Claude Code inside a Marshal space (elsewhere the command says so) | The space's own overview, audit, requests, reviews, ports, changes and cost. Read only |
 
@@ -77,7 +77,7 @@ carries `marshal-plugin-<version>.zip` and its `.sha256`: the plugin alone, with
    the plugin's `url` setting) and sign in. Your org must have MCP access turned on.
 
 In Claude Desktop the upload gives you the skills (`delegate`, `inbox`, `debug-run`,
-`suggest-stack`). The panes are a Claude Code mod and run in the Claude Code terminal. The live
+`improve-deputy`, `suggest-stack`). The panes are a Claude Code mod and run in the Claude Code terminal. The live
 view in Claude Desktop is the fleet card: ask "show my Marshal fleet" (see below).
 
 What it shows:

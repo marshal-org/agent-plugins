@@ -3,6 +3,12 @@
 Each release of the `marshal` plugin, newest first. The release on GitHub
 (`marshal-v<version>`) shows the section for its version.
 
+## 0.3.7
+
+- New skill `improve-deputy`: give it a run or a deputy and it reads how the runs spent their
+  time and money, then proposes exact changes to the mission text, the deputy's settings, the
+  manifest or the compute class, each with the evidence and what it would save.
+
 ## 0.3.6
 
 - The fleet pane reads well in terminals where Claude Code shows no clickable links, such as
