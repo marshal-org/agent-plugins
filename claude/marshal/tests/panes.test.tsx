@@ -447,7 +447,48 @@ test('run links go to the web app of the server the panes read, not the default 
   await $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
   await w.clock.advance(3500)
   const ui = await $.ui.mount({ ...FLEET, surface: 'desktop' })
-  const link = await ui.find({ type: 'Link' })
-  expect(String(link?.props.href)).toMatch(/^https:\/\/marshal\.example\.com\/runs\//)
+  const hrefs = (await ui.findAll({ type: 'Link' })).map(l => String(l.props.href))
+  expect(hrefs.some(h => h.startsWith('https://marshal.example.com/runs/'))).toBe(true)
+  expect(hrefs.every(h => h.startsWith('https://marshal.example.com'))).toBe(true)
+  await ui.unmount()
+})
+
+// The desktop app names its Marshal connector by a UUID, which no config file
+// holds: links fall back to the url setting, and the header shows its host.
+const UUID_SERVER = '95ac8332-eba4-42c9-b98f-c20c87d09469'
+const UUID_TOOLS = ['runs_attention', 'runs_get', 'inbox_answer'].map(t => `mcp__${UUID_SERVER}__${t}`)
+
+test('a desktop connector named by a UUID links every message to its run', { options: { url: 'https://marshal.example.com/mcp' } }, async ($, on) => {
+  const w = world(on, { inSpace: false, tools: UUID_TOOLS, mcp: fleetMcp, home: '/h', files: { '/h/.claude.json': '{}' } })
+  await $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
+  await w.clock.advance(3500)
+  expect(w.calls.every(c => c.server === UUID_SERVER)).toBe(true)
+  const run1 = 'https://marshal.example.com/runs/run-1'
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...FLEET, surface })
+    // The header names the host, never the UUID.
+    expect(await ui.find({ type: 'Text', text: new RegExp(UUID_SERVER) })).toBeUndefined()
+    const links = await ui.findAll({ type: 'Link' })
+    const to = (href: string) => links.filter(l => String(l.props.href) === href)
+    expect(to('https://marshal.example.com')).toHaveLength(1)
+    // The ask card: its title, the run it comes from, and "open run"; and the run row's title.
+    expect(to(run1).length).toBeGreaterThanOrEqual(4)
+    expect(to('https://marshal.example.com/runs/run-done')).toHaveLength(1)
+    await ui.unmount()
+
+    const band = await $.ui.mount({ plugin: 'marshal', surface, component: 'AbovePrompt', props: { bodyColumns: 80, hasSurvey: false } } as never)
+    expect((await band.findAll({ type: 'Link' })).map(l => String(l.props.href))).toEqual([run1])
+    await band.unmount()
+  }
+})
+
+test('without a url setting a UUID connector draws no links and no UUID', async ($, on) => {
+  const w = world(on, { inSpace: false, tools: UUID_TOOLS, mcp: fleetMcp, home: '/h', files: { '/h/.claude.json': '{}' } })
+  await $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
+  await w.clock.advance(3500)
+  const ui = await $.ui.mount({ ...FLEET, surface: 'desktop' })
+  expect(await ui.findAll({ type: 'Link' })).toHaveLength(0)
+  expect(await ui.find({ type: 'Text', text: new RegExp(UUID_SERVER) })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /shipper asks/ })).toBeDefined()
   await ui.unmount()
 })

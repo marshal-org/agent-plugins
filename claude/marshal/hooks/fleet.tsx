@@ -37,6 +37,21 @@ export function cellName(server: string): string {
   return server.replace(/^marshal[-_]?/, '') || server
 }
 
+// A desktop app connector is named by a UUID: not a name to show.
+const UUID_LIKE = /^[0-9a-f]{8}[-_][0-9a-f]{4}[-_]/i
+
+// What the pane calls a cell: its web host when known, else its server name.
+export function cellLabel(cell: FleetCell): string {
+  if (cell.webUrl) {
+    try {
+      return new URL(cell.webUrl).host
+    } catch {
+      // Fall through to the server name.
+    }
+  }
+  return UUID_LIKE.test(cell.server) ? '' : cellName(cell.server)
+}
+
 type Look = { glyph: string; color: string | undefined; isDim: boolean }
 
 // One glyph and color per run state, so a list reads at a glance.
@@ -60,16 +75,20 @@ export function look(state: string): Look {
   }
 }
 
-function section(kit: Kit, width: number, label: string, count: number, color?: string) {
+// A section title: the label and its count on one line. No rule after it: a
+// rule sized in columns wraps on a surface with a proportional font.
+function section(kit: Kit, label: string, count: number, color?: string) {
   const { Box, Text } = kit
-  const rule = Math.max(0, width - label.length - String(count).length - 6)
   return (
     <Box key={`sec:${label}`} flexDirection="row" gap={1} marginTop={1} paddingX={1}>
-      <Text bold color={color}>
-        {label.toUpperCase()}
-      </Text>
-      <Text dimColor>{count}</Text>
-      <Text dimColor>{'─'.repeat(rule)}</Text>
+      <Box flexShrink={0}>
+        <Text bold color={color}>
+          {label.toUpperCase()}
+        </Text>
+      </Box>
+      <Box flexShrink={0}>
+        <Text dimColor>{count}</Text>
+      </Box>
     </Box>
   )
 }
@@ -84,7 +103,8 @@ function stat(kit: Kit, key: string, glyph: string, n: number, label: string, co
 }
 
 function header($: EngineInterface, kit: Kit, cell: FleetCell | undefined, t: ReturnType<typeof totals>, updated: string) {
-  const { Box, Text, Button } = kit
+  const { Box, Text, Button, Link } = kit
+  const label = cell ? cellLabel(cell) : ''
   return (
     <Box key="head" flexDirection="column" borderStyle="round" borderColor="suggestion" paddingX={1}>
       <Box flexDirection="row" justifyContent="space-between">
@@ -92,8 +112,8 @@ function header($: EngineInterface, kit: Kit, cell: FleetCell | undefined, t: Re
           <Text bold color="suggestion">
             ◆ Marshal
           </Text>
-          {cell && <Text dimColor>·</Text>}
-          {cell && <Text bold>{cellName(cell.server)}</Text>}
+          {label !== '' && <Text dimColor>·</Text>}
+          {label !== '' && <Text bold>{cell?.webUrl && Link ? <Link href={cell.webUrl}>{label}</Link> : label}</Text>}
           {cell?.isProd && (
             <Text bold color="inverseText" backgroundColor="error">
               {' PROD '}
@@ -141,11 +161,46 @@ function prChips(kit: Kit, runId: string, prs: readonly FleetPr[]) {
   )
 }
 
+// Fixed-width columns: spaces cannot align text in a proportional font, so
+// the glyph, deputy and age each sit in a box of their own. The glyph box is
+// as wide as the indent of the lines under a row, so they line up with its title.
+function glyphCell(kit: Kit, glyph: string, color: string | undefined, isDim: boolean) {
+  const { Box, Text } = kit
+  return (
+    <Box width={2} flexShrink={0}>
+      <Text color={color} dimColor={isDim}>
+        {glyph}
+      </Text>
+    </Box>
+  )
+}
+
+function deputyCell(kit: Kit, deputy: string) {
+  const { Box, Text } = kit
+  if (deputy === '') return undefined
+  return (
+    <Box flexShrink={0} marginLeft={2}>
+      <Text color="suggestion" dimColor wrap="truncate-end">
+        {cut(deputy, 16)}
+      </Text>
+    </Box>
+  )
+}
+
+function ageCell(kit: Kit, text: string) {
+  const { Box, Text } = kit
+  return (
+    <Box width={4} flexShrink={0} marginLeft={1} justifyContent="flex-end">
+      <Text dimColor>{text}</Text>
+    </Box>
+  )
+}
+
 // A run: glyph, title (a link to the run page), age; the deputy and why it
 // stopped under it; the full task, id and times revealed on hover. A failed
 // run (not a parked one, which still waits on something) can be cleared.
 function runRow($: EngineInterface, kit: Kit, now: number, cell: FleetCell, r: FleetRun, canClear = false) {
-  const { Box, Text, Link, Button } = kit
+  const { Box, Text, Button } = kit
   const l = look(r.state)
   const href = runUrl(cell, r.id)
   // The glyph already says running or succeeded; other states are spelled out.
@@ -154,27 +209,17 @@ function runRow($: EngineInterface, kit: Kit, now: number, cell: FleetCell, r: F
   const isActive = l.glyph === '●'
   return (
     <Box key={`run:${r.id}`} flexDirection="column" paddingX={1}>
-      <Box flexDirection="row" gap={1}>
-        <Text color={l.color} dimColor={l.isDim}>
-          {l.glyph}
-        </Text>
+      <Box flexDirection="row">
+        {glyphCell(kit, l.glyph, l.color, l.isDim)}
         <Box flexGrow={1} flexShrink={1}>
           <Text wrap="truncate-end" bold={isActive} dimColor={l.isDim}>
-            {href && Link ? <Link href={href}>{r.title}</Link> : r.title}
+            {link(kit, href, r.title)}
           </Text>
         </Box>
-        {r.deputy !== '' && (
-          <Box flexShrink={0}>
-            <Text color="suggestion" dimColor wrap="truncate-end">
-              {cut(r.deputy, 16)}
-            </Text>
-          </Box>
-        )}
-        <Box flexShrink={0}>
-          <Text dimColor>{age(r.completedAt || r.createdAt, now).padStart(3)}</Text>
-        </Box>
+        {deputyCell(kit, r.deputy)}
+        {ageCell(kit, age(r.completedAt || r.createdAt, now))}
         {canClear && r.state !== 'parked' && (
-          <Box flexShrink={0}>
+          <Box flexShrink={0} marginLeft={1}>
             <Button key={`clear:${r.id}`} label="Clear" plain dimColor onPress={() => clearRun($, cell.server, r.id)} />
           </Box>
         )}
@@ -212,21 +257,13 @@ function queuedRow(kit: Kit, now: number, q: FleetQueued) {
   const meta = q.reason || (q.position > 0 ? `#${q.position} in queue` : '')
   return (
     <Box key={`queued:${q.id}`} flexDirection="column" paddingX={1}>
-      <Box flexDirection="row" gap={1}>
-        <Text dimColor>◌</Text>
+      <Box flexDirection="row">
+        {glyphCell(kit, '◌', undefined, true)}
         <Box flexGrow={1} flexShrink={1}>
           <Text wrap="truncate-end">{q.title}</Text>
         </Box>
-        {q.deputy !== '' && (
-          <Box flexShrink={0}>
-            <Text color="suggestion" dimColor wrap="truncate-end">
-              {cut(q.deputy, 16)}
-            </Text>
-          </Box>
-        )}
-        <Box flexShrink={0}>
-          <Text dimColor>{age(q.createdAt, now).padStart(3)}</Text>
-        </Box>
+        {deputyCell(kit, q.deputy)}
+        {ageCell(kit, age(q.createdAt, now))}
       </Box>
       {meta !== '' && (
         <Box paddingLeft={2}>
@@ -245,6 +282,12 @@ export function askSource(a: FleetAsk): string {
   return a.runTitle ? `${a.runTitle} · run ${id}` : id ? `run ${id}` : ''
 }
 
+// The text as a link to href when both are there, else the plain text.
+function link(kit: Kit, href: string, text: string) {
+  const { Link } = kit
+  return href !== '' && Link ? <Link href={href}>{text}</Link> : text
+}
+
 // An ask: an amber card with the question and one button per answer. No
 // hotkeys on purpose: an answer can merge a PR, so it takes a deliberate press.
 function askCard($: EngineInterface, kit: Kit, answering: Answering, cell: FleetCell, a: FleetAsk) {
@@ -256,17 +299,21 @@ function askCard($: EngineInterface, kit: Kit, answering: Answering, cell: Fleet
   return (
     <Box key={`ask:${a.askId}`} flexDirection="column" borderStyle="round" borderColor="warning" paddingX={1}>
       <Box flexDirection="row" justifyContent="space-between">
-        <Box flexDirection="row" gap={1}>
+        <Box flexDirection="row" gap={1} flexShrink={1}>
           <Text bold color="warning">
-            ◆ {a.deputy || 'A run'} asks
+            {link(kit, href, `◆ ${a.deputy || 'A run'} asks`)}
           </Text>
           {rung !== '' && <Text dimColor>{rung}</Text>}
         </Box>
-        {href !== '' && Link && <Link href={href}>↗ run</Link>}
+        {href !== '' && Link && (
+          <Box flexShrink={0} marginLeft={1}>
+            <Link href={href}>↗ open run</Link>
+          </Box>
+        )}
       </Box>
       {askSource(a) !== '' && (
         <Text dimColor wrap="truncate-end">
-          from {askSource(a)}
+          from {link(kit, href, askSource(a))}
         </Text>
       )}
       {Markdown ? <Markdown key={`q:${a.askId}`} text={question} /> : <Text wrap="wrap">{flat(question)}</Text>}
@@ -324,14 +371,13 @@ export async function renderFleet($: EngineInterface, kit: Kit, width: number, p
   const now = await $.clock.now()
   const t = totals(fleet)
   const updated = age(new Date(fleet.polledAt).toISOString(), now)
-  const inner = Math.max(20, width - 2)
 
   return (
     <Box flexDirection="column">
       {header($, kit, fleet.cells[0], t, updated)}
       {fleet.cells.map(cell => (
         <Box key={`cell:${cell.server}`} flexDirection="column">
-          {fleet.cells.length > 1 && section(kit, inner, cellName(cell.server), cell.active.length)}
+          {fleet.cells.length > 1 && section(kit, cellLabel(cell) || 'Marshal', cell.active.length)}
           {cell.error !== '' && notice(kit, `Cannot read ${cell.server}: ${cut(cell.error, 300)}`, 'error')}
           {cell.launchedOnly && cell.error === '' && (
             <Box marginTop={1} paddingX={1}>
@@ -343,20 +389,20 @@ export async function renderFleet($: EngineInterface, kit: Kit, width: number, p
               <Text color="success">✓ Nothing needs you.</Text>
             </Box>
           )}
-          {cell.asks.length > 0 && section(kit, inner, 'Needs you', cell.asks.length, 'warning')}
+          {cell.asks.length > 0 && section(kit, 'Needs you', cell.asks.length, 'warning')}
           {cell.asks.map(a => askCard($, kit, answering, cell, a))}
-          {cell.attention.length > 0 && section(kit, inner, 'Failed or parked', cell.attention.length, 'error')}
+          {cell.attention.length > 0 && section(kit, 'Failed or parked', cell.attention.length, 'error')}
           {cell.attention.map(r => runRow($, kit, now, cell, r, true))}
-          {section(kit, inner, 'Running', cell.active.length)}
+          {section(kit, 'Running', cell.active.length)}
           {cell.active.length === 0 && (
             <Box paddingX={1}>
               <Text dimColor>No runs right now.</Text>
             </Box>
           )}
           {cell.active.map(r => runRow($, kit, now, cell, r))}
-          {cell.queued.length > 0 && section(kit, inner, 'Queued', cell.queued.length)}
+          {cell.queued.length > 0 && section(kit, 'Queued', cell.queued.length)}
           {cell.queued.map(q => queuedRow(kit, now, q))}
-          {cell.recent.length > 0 && section(kit, inner, 'Recently ended', cell.recent.length)}
+          {cell.recent.length > 0 && section(kit, 'Recently ended', cell.recent.length)}
           {cell.recent.map(r => runRow($, kit, now, cell, r))}
         </Box>
       ))}
@@ -373,11 +419,12 @@ export async function renderFleet($: EngineInterface, kit: Kit, width: number, p
 // question never waits for the pane to be opened. Click only, no digit
 // hotkeys: a bare digit in an empty prompt would answer it.
 export async function renderAskBand($: EngineInterface, kit: Kit, width: number): Promise<unknown> {
-  const { Box, Text, Button } = kit
+  const { Box, Text, Button, Link } = kit
   const fleet = await read($, fleetAtom)
   const cell = fleet.cells.find(c => c.asks.length > 0)
   const a = cell?.asks[0]
   if (!cell || !a) return undefined
+  const href = runUrl(cell, a.runId)
   const more = fleet.cells.reduce((n, c) => n + c.asks.length, 0) - 1
   const lead = `◆ ${a.deputy || 'A run'}${a.runTitle ? ` (${cut(a.runTitle, 40)})` : ''} asks`
   return (
@@ -401,6 +448,7 @@ export async function renderAskBand($: EngineInterface, kit: Kit, width: number)
             onPress={() => sendAnswer($, cell.server, a.askId, c)}
           />
         ))}
+        {href !== '' && Link && <Link href={href}>↗ open run</Link>}
         <Text dimColor>{more > 0 ? `+${more} more · ` : ''}details in /marshal-fleet</Text>
       </Box>
     </Box>

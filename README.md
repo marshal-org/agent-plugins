@@ -42,6 +42,10 @@ claude plugin install marshal --marketplace marshal-org/agent-plugins --config u
 earlier from another source (a branch or a local folder). Run `claude plugin marketplace remove marshal`
 once, then the command above.
 
+Each plugin is released on its own, when its version changes: the GitHub release `<plugin>-v<version>`
+(for example `marshal-v0.3.4`) lists what changed, from the plugin's `CHANGELOG.md`. Pin one with
+`marshal@marshal-org/agent-plugins#marshal-v0.3.4`.
+
 Then in Claude Code: `/mcp`, pick `plugin:marshal:marshal`, sign in. Your org must have MCP access
 turned on. Then `/marshal-fleet` opens the pane beside the transcript (fullscreen terminal) or inline.
 

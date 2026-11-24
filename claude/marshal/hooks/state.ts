@@ -37,9 +37,8 @@ export async function findCell($: EngineInterface): Promise<Cell | undefined> {
   }
   mod.problem = ''
   // Links go to the web app of the server the panes read. The url setting is
-  // that address only when the panes read the plugin's own server; any other
-  // server's address is in Claude Code's MCP config. (The url defaults to
-  // Marshal cloud, so using it for another server sent every link there.)
+  // that address when the panes read the plugin's own server; any other
+  // server's address is in Claude Code's MCP config.
   let webUrl = !mod.inSpace && server === OWN_SERVER ? webBase(mod.config.url) : ''
   if (!webUrl) {
     try {
@@ -49,6 +48,10 @@ export async function findCell($: EngineInterface): Promise<Cell | undefined> {
       // Links are a convenience; the board works without them.
     }
   }
+  // A server that config does not name (the desktop app's connectors are
+  // named by a UUID): the url setting is the person's own Marshal, so links
+  // go there. The placeholder default is never used (readConfig drops it).
+  if (!webUrl && !mod.inSpace) webUrl = webBase(mod.config.url)
   const tools = toolsOf(server, names)
   return { server, webUrl, hasPrs: tools.has('runs_prs'), hasAttention: tools.has('runs_attention'), hasQueue: tools.has('runs_cancel_queued'), hasSpaceReads: tools.has('spaces_usage') && tools.has('spaces_changes') }
 }

@@ -1,6 +1,6 @@
 {
   "name": "marshal",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Marshal in Claude Code: delegate work to Marshal runs, watch your fleet of deputy runs in a live pane and answer what needs you, and inspect the space you work in.",
   "author": {
     "name": "Marshal",
