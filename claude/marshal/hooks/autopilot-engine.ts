@@ -37,6 +37,9 @@ export type ApCell = {
   hasInboxGet: boolean
   hasQueue: boolean
   hasMessage: boolean
+  // In a space with answer_children: read with children_ask_get, answer with
+  // children_ask_answer. The space has no inbox tools and no deputies_queue.
+  hasChildAsks?: boolean
 }
 
 // Module state, rebuilt on every load (a reload drops it; the journal is
@@ -150,8 +153,11 @@ function notify(c: Cycle, a: FleetAsk, why: string, urgent = false, minutes?: nu
 // is still open. A failed read falls back to what runs_attention said.
 // Choices come both ways: exact (what an answer sends) in input.choices,
 // collapsed (what the journal and the strip show) in shown.
-async function readAsk($: EngineInterface, server: string, a: FleetAsk, hasInboxGet: boolean): Promise<{ input: Partial<AskInput>; shown?: string[]; status: string; blocked: string; respondedBy: string; answer: string }> {
-  if (!hasInboxGet) return { input: {}, status: '', blocked: '', respondedBy: '', answer: '' }
+type ReadAsk = { input: Partial<AskInput>; shown?: string[]; status: string; blocked: string; respondedBy: string; answer: string }
+
+async function readAsk($: EngineInterface, server: string, a: FleetAsk, apc: ApCell): Promise<ReadAsk> {
+  if (apc.hasChildAsks) return readChildAsk($, server, a)
+  if (!apc.hasInboxGet) return { input: {}, status: '', blocked: '', respondedBy: '', answer: '' }
   try {
     const v = resultJson(await $.mcp.call(server, 'inbox_get', { ask_id: a.askId })) as Record<string, unknown>
     const req = (v.request && typeof v.request === 'object' ? v.request : {}) as Record<string, unknown>
@@ -176,6 +182,30 @@ async function readAsk($: EngineInterface, server: string, a: FleetAsk, hasInbox
   }
 }
 
+// children_ask_get, in a space: the same facts as inbox_get, flat, with the
+// question, context and each choice in its own untrusted-content envelope.
+async function readChildAsk($: EngineInterface, server: string, a: FleetAsk): Promise<ReadAsk> {
+  try {
+    const v = resultJson(await $.mcp.call(server, 'children_ask_get', { ask_id: a.askId })) as Record<string, unknown>
+    const offered = Array.isArray(v.choices) ? choicesOf(v.choices) : { shown: a.choices, exact: exactChoices(a) }
+    return {
+      input: {
+        question: plainText(v.question) || a.question,
+        context: plainText(v.context),
+        choices: offered.exact,
+        allowFreeText: v.allow_free_text === true,
+      },
+      shown: offered.shown,
+      status: typeof v.status === 'string' ? v.status : '',
+      blocked: v.answerable === false ? String(v.blocked ?? 'blocked') : '',
+      respondedBy: typeof v.responded_by === 'string' ? v.responded_by : '',
+      answer: '',
+    }
+  } catch {
+    return { input: {}, status: '', blocked: '', respondedBy: '', answer: '' }
+  }
+}
+
 // The ask's choices exactly as offered (the board keeps both forms).
 function exactChoices(a: FleetAsk): string[] {
   return a.choiceTexts && a.choiceTexts.length === a.choices.length ? a.choiceTexts : a.choices
@@ -188,7 +218,7 @@ function runRepos(cell: FleetCell, runId: string): string[] {
 
 // What the decision gets for one ask.
 async function gather($: EngineInterface, c: Cycle, cell: FleetCell, a: FleetAsk, apc: ApCell) {
-  const read = await readAsk($, cell.server, a, apc.hasInboxGet)
+  const read = await readAsk($, cell.server, a, apc)
   const run = runOf(cell, a.runId)
   const prs = (run?.prs ?? []).filter(p => p.repo !== '')
   const input: AskInput = {
@@ -225,8 +255,9 @@ async function gather($: EngineInterface, c: Cycle, cell: FleetCell, a: FleetAsk
 }
 
 // The answer path: inbox_answer, as the person, with the exact choice text
-// and Autopilot's note where the server keeps one. One try: an answer the
-// platform refuses is never sent again.
+// and Autopilot's note where the server keeps one; in a space with
+// answer_children, children_ask_answer, as the space's owner. One try: an
+// answer the platform refuses is never sent again.
 const ELSEWHERE = /already been answered|settled while you were answering|someone else is already answering/i
 export const VIA_MAX = 120
 
@@ -238,7 +269,7 @@ async function act($: EngineInterface, c: Cycle, cell: FleetCell, a: FleetAsk, v
   const args: Record<string, unknown> = { ask_id: a.askId, answer: v.answer }
   if (apc.hasVia) args.via = viaNote(v.ruleId)
   try {
-    resultJson(await $.mcp.call(cell.server, 'inbox_answer', args))
+    resultJson(await $.mcp.call(cell.server, apc.hasChildAsks ? 'children_ask_answer' : 'inbox_answer', args))
   } catch (err) {
     const why = firstLine(err instanceof Error ? err.message : String(err))
     if (ELSEWHERE.test(why)) {
@@ -269,6 +300,9 @@ async function holdBack($: EngineInterface, c: Cycle, cell: FleetCell, a: FleetA
     return bar.ok ? '' : `the merge bar does not hold: ${bar.reason}`
   }
   if (v.gate === 'resume') {
+    // In a space, deputies_queue is not an orchestration tool: there is no way
+    // to see whether the cell has room, so a resume always goes to the person.
+    if (!apc.hasQueue && apc.hasChildAsks) return 'in a space Autopilot cannot check the server has room (deputies_queue is not available to a space), so resumes go to you'
     if (!apc.hasQueue || !a.deputy) return 'cannot check the server has room (no deputy queue)'
     try {
       const q = resultJson(await $.mcp.call(cell.server, 'deputies_queue', { deputy: a.deputy })) as { queued?: unknown[] }
@@ -344,7 +378,7 @@ async function captureAnswers($: EngineInterface, c: Cycle, prevCell: FleetCell 
     if (j && (j.outcome === 'answered' || j.outcome === 'answered_elsewhere' || j.outcome === 'refused')) continue
     let answer = ap.paneAnswers.get(a.askId) ?? ''
     if (!answer && apc.hasInboxGet) {
-      const read = await readAsk($, cell.server, a, true)
+      const read = await readAsk($, cell.server, a, { ...apc, hasInboxGet: true })
       if (read.status && read.status !== 'resolved') continue
       answer = read.answer
     }

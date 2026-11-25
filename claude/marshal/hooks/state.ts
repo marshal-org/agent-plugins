@@ -75,6 +75,9 @@ export async function findCell($: EngineInterface): Promise<Cell | undefined> {
     hasInboxGet: tools.has('inbox_get'),
     hasDeputyQueue: tools.has('deputies_queue'),
     hasMessage: tools.has('runs_message'),
+    // A space whose orchestration turns on answer_children: its children's
+    // asks are read and answered through these three tools, never the inbox.
+    hasChildAsks: tools.has('children_attention') && tools.has('children_ask_get') && tools.has('children_ask_answer'),
   }
 }
 
@@ -96,8 +99,10 @@ export async function poll($: EngineInterface): Promise<void> {
         if (!mod.inSpace) await pollFleet($, [mod.cell], mod.config.notify)
         else {
           // No desktop to notify in a space; the inspector reads last so the
-          // status line stays the space's own.
-          if (mod.fleetOpened) await pollFleet($, [mod.cell], false)
+          // status line stays the space's own. A space that may answer its
+          // children's asks is read without the pane open too, so Autopilot
+          // runs unattended there.
+          if (mod.fleetOpened || mod.cell.hasChildAsks) await pollFleet($, [mod.cell], false)
           if (mod.config.space !== 'off') await pollInspector($, mod.cell.server, mod.cell.hasSpaceReads === true)
         }
         mod.problem = ''

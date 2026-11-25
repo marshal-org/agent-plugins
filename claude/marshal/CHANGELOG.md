@@ -3,6 +3,17 @@
 Each release of the `marshal` plugin, newest first. The release on GitHub
 (`marshal-v<version>`) shows the section for its version.
 
+## 0.4.1
+
+- Marshal Autopilot runs unattended inside a Marshal space. When the space's stack turns on
+  `answer_children`, Autopilot reads what the runs this space launched are waiting on and
+  answers them by your rules, as you, through `children_attention`, `children_ask_get` and
+  `children_ask_answer` (with its note), instead of your inbox. It checks for new asks without
+  `/marshal-fleet` open.
+- In a space, a resume question always goes to you: Autopilot cannot see whether the server has
+  room there, because a space has no deputy queue to read.
+- Answering an ask from the fleet pane in such a space answers it through the space as well.
+
 ## 0.4.0
 
 - Marshal Autopilot answers the questions your runs ask, by rules you set, and brings you the

@@ -22,6 +22,9 @@ export async function callJson($: EngineInterface, server: string, tool: string,
 // hasQueue: the server lists runs_cancel_queued, so its runs_list takes
 // include_queued (added before it); an older server refuses the argument.
 // hasVia: inbox_answer's listing says it takes Autopilot's via note.
+// hasChildAsks: a space with answer_children lists children_attention,
+// children_ask_get and children_ask_answer: its children's asks are read and
+// answered through them (the space never has the inbox tools).
 export type Cell = {
   server: string
   webUrl: string
@@ -33,7 +36,11 @@ export type Cell = {
   hasInboxGet?: boolean
   hasDeputyQueue?: boolean
   hasMessage?: boolean
+  hasChildAsks?: boolean
 }
+
+// The servers whose asks are answered through children_ask_answer.
+const childAskServers = new Set<string>()
 
 // Failed runs the person cleared from the pane, per server, kept across
 // sessions. Marshal has no "seen" mark for a run, so this is the plugin's own.
@@ -119,10 +126,18 @@ const LIST_LIMIT = 30
 export async function readCell($: EngineInterface, cell: Cell): Promise<FleetCell> {
   try {
     // A space's marshal-orchestration has no runs_attention: its runs_list
-    // holds only the runs this space launched, and nothing waits on a person.
+    // holds only the runs this space launched. With answer_children,
+    // children_attention says what those runs wait on; without it, nothing
+    // that waits on a person is read here.
     const launchedOnly = cell.hasAttention === false
+    if (cell.hasChildAsks) childAskServers.add(cell.server)
+    else childAskServers.delete(cell.server)
     const [attention, list, cleared] = await Promise.all([
-      launchedOnly ? undefined : $.mcp.call(cell.server, 'runs_attention', { minutes: ATTENTION_MINUTES }),
+      cell.hasChildAsks
+        ? $.mcp.call(cell.server, 'children_attention', { minutes: ATTENTION_MINUTES })
+        : launchedOnly
+          ? undefined
+          : $.mcp.call(cell.server, 'runs_attention', { minutes: ATTENTION_MINUTES }),
       $.mcp.call(cell.server, 'runs_list', { limit: LIST_LIMIT, task_chars: -1, ...(cell.hasQueue && { include_queued: true }) }),
       clearedRuns($, cell.server),
     ])
@@ -151,7 +166,16 @@ export async function pollFleet($: EngineInterface, cells: readonly Cell[], noti
       prev,
       next,
       desktop: notify,
-      cells: cells.map(c => ({ server: c.server, hasPrs: c.hasPrs === true, hasVia: c.hasVia === true, hasInboxGet: c.hasInboxGet === true, hasQueue: c.hasDeputyQueue === true, hasMessage: c.hasMessage === true })),
+      cells: cells.map(c => ({
+        server: c.server,
+        hasPrs: c.hasPrs === true,
+        // children_ask_answer always takes the via note.
+        hasVia: c.hasVia === true || c.hasChildAsks === true,
+        hasInboxGet: c.hasInboxGet === true || c.hasChildAsks === true,
+        hasQueue: c.hasDeputyQueue === true,
+        hasMessage: c.hasMessage === true,
+        hasChildAsks: c.hasChildAsks === true,
+      })),
     })
   } catch {
     // Autopilot never stands between the person and their notifications.
@@ -182,7 +206,8 @@ export async function answerAsk($: EngineInterface, server: string, askId: strin
   ap.paneAnswers.set(askId, text)
   let isAnswered = false
   try {
-    resultJson(await $.mcp.call(server, 'inbox_answer', { ask_id: askId, answer: text }))
+    const tool = childAskServers.has(server) ? 'children_ask_answer' : 'inbox_answer'
+    resultJson(await $.mcp.call(server, tool, { ask_id: askId, answer: text }))
     $.ui.toast(`Answered: ${cut(text, 60)}`)
     isAnswered = true
   } catch (err) {

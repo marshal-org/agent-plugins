@@ -37,6 +37,19 @@ and `problem` when something is wrong. Show the person:
 
 Anything no rule covers goes to the person. A protect rule always beats an answer rule.
 
+## In a Marshal space
+
+In a space, Autopilot answers the asks of the runs this space launched, and only those. It
+needs the space's stack to turn on `answer_children`: then the space's Marshal server lists
+`children_attention`, `children_ask_get` and `children_ask_answer`, and Autopilot uses them in
+place of the person's inbox, as the space's owner, with its note. Without them a space has no
+asks to answer: say so. In a space:
+
+- Takeover asks never get an answer from the space, and approvals and tool-permission requests
+  only when the org lets agents answer approval gates; the rest go to the person in the web app.
+- A resume question always goes to the person: a space cannot read the deputy queue, so
+  Autopilot cannot check that the server has room.
+
 ## Setup: a decision brief
 
 When there is no policy, or the person asks to set up again, ask everything in one decision

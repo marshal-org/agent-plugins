@@ -217,7 +217,7 @@ export function world(on: On, opts: WorldOpts = {}) {
         .flatMap(([, f]) => f.text.split('\n').filter(Boolean).map(l => JSON.parse(l) as Record<string, unknown>))
     },
     answers(): Call[] {
-      return calls.filter(c => c.tool === 'inbox_answer')
+      return calls.filter(c => c.tool === 'inbox_answer' || c.tool === 'children_ask_answer')
     },
   }
   return w
@@ -601,6 +601,90 @@ test('US2: a resume question with room is answered', async ($, on) => {
   await start($, w)
   expect(w.answers().map(c => c.args.answer)).toEqual(['Resume'])
   neverActs(w)
+})
+
+// In a Marshal space with answer_children (docs/specs/feat-orch-child-asks):
+// the space has no inbox and no attention view of the person. It reads and
+// answers its own children's asks through the three children_* tools, polls
+// without the pane open, and never calls the person's inbox tools.
+const CHILD_TOOLS = ['children_attention', 'children_ask_get', 'children_ask_answer', 'runs_get', 'runs_list', 'runs_message']
+
+function childAskGet(a: AskFixture, over: Record<string, unknown> = {}) {
+  const wrap = (t: string) => `<untrusted-content source="ask ${a.ask_id}">${t}</untrusted-content>`
+  return {
+    ask_id: a.ask_id,
+    run_id: a.run_id,
+    deputy: a.deputy,
+    rung: a.rung,
+    status: 'pending',
+    question: wrap(a.question),
+    choices: (a.choices ?? []).map(wrap),
+    allow_free_text: a.rung !== 'approve',
+    answerable: true,
+    ...over,
+  }
+}
+
+function spaceWorld(on: On, asks: AskFixture[], extra: Partial<WorldOpts> = {}) {
+  return world(on, {
+    asks,
+    inSpace: true,
+    tools: CHILD_TOOLS.map(t => `mcp__${SERVER}__${t}`),
+    files: { [POLICY]: policyYaml({ mode: 'routine' }) },
+    ...extra,
+    mcp: (c, w) => {
+      const custom = extra.mcp?.(c, w)
+      if (custom !== undefined) return custom
+      switch (c.tool) {
+        case 'children_attention':
+          return text(attention(asks))
+        case 'children_ask_get': {
+          const a = asks.find(x => x.ask_id === c.args.ask_id)
+          return text(a ? childAskGet(a) : { status: 'resolved' })
+        }
+        case 'children_ask_answer':
+          return text({ ask_id: c.args.ask_id, status: 'resolved', run_id: 'r', rung: 'ask' })
+      }
+      return undefined
+    },
+  })
+}
+
+const INBOX_TOOLS = ['runs_attention', 'inbox_list', 'inbox_get', 'inbox_answer', 'inbox_reply']
+
+test('US2: in a space Autopilot reads and answers through the children tools, with the via note, never the inbox', async ($, on) => {
+  const w = spaceWorld(on, [PROCEED], { model: byKind([PROCEED]) })
+  await start($, w)
+  expect(w.calls.some(c => c.tool === 'children_attention')).toBe(true)
+  expect(w.calls.find(c => c.tool === 'children_ask_get')?.args).toEqual({ ask_id: 'proceed' })
+  expect(w.answers().map(c => ({ tool: c.tool, ...c.args }))).toEqual([
+    { tool: 'children_ask_answer', ask_id: 'proceed', answer: 'Proceed', via: 'Autopilot: rule preset.proceed' },
+  ])
+  expect(w.journal()[0]).toMatchObject({ outcome: 'answered', accepted: true, via_stored: true, space_hosted: true })
+  expect(w.calls.filter(c => INBOX_TOOLS.includes(c.tool)).map(c => c.tool)).toEqual([])
+  neverActs(w)
+})
+
+test('US2: in a space a resume question goes to the person: deputies_queue is not available to a space', async ($, on) => {
+  const resume = ROUTINE_ASKS[3]!
+  const w = spaceWorld(on, [resume], { model: byKind([resume]) })
+  await start($, w)
+  expect(w.answers()).toHaveLength(0)
+  expect(String(w.journal()[0]!.reason)).toMatch(/in a space Autopilot cannot check the server has room/)
+  expect(w.calls.some(c => c.tool === 'deputies_queue')).toBe(false)
+  neverActs(w)
+})
+
+test('US2: in a space a takeover the platform will not let it answer goes to the person without an answer call', async ($, on) => {
+  const takeover = NEVER_AUTO_ASKS[0]!
+  const w = spaceWorld(on, [takeover], {
+    model: byKind([takeover]),
+    mcp: c => (c.tool === 'children_ask_get' ? text(childAskGet(takeover, { answerable: false, blocked: 'takeover_not_answerable' })) : undefined),
+  })
+  await start($, w)
+  expect(w.answers()).toHaveLength(0)
+  expect(String(w.journal()[0]!.reason)).toMatch(/takeover_not_answerable/)
+  expect(w.prompts).toHaveLength(0)
 })
 
 // The protection table (G-004): every preset gate kind and every never-auto
