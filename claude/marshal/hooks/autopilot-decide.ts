@@ -27,6 +27,10 @@ export type AskInput = {
   allowFreeText: boolean
   // owner/repo of the run's pull requests.
   repos: string[]
+  // Full owner/name of every repository the person's runs on this server
+  // work in (and the policy names), so a short reference like "marshal#12"
+  // resolves without guessing the owner.
+  knownRepos?: string[]
   // The files the run's pull requests change, when read; undefined when no
   // rule needs them; 'unreadable' when they could not be read.
   files?: { repo: string; number: number; title: string; paths: string[] }[] | 'unreadable'
@@ -133,6 +137,7 @@ export function askBlock(a: AskInput): string {
   )
   if (a.choices.length > 0) parts.push(a.allowFreeText ? 'Free text is allowed besides the choices, but prefer a choice.' : 'Free text is NOT allowed: pick a choice or notify.')
   parts.push(`Repositories of the run's pull requests: ${a.repos.length ? a.repos.join(', ') : '(none known)'}`)
+  if (a.knownRepos?.length) parts.push(`Repositories the person's runs work in, by full name (use these for reads; "name#N" means the one whose name matches): ${a.knownRepos.join(', ')}`)
   if (a.files === 'unreadable') parts.push("The pull requests' files could not be read.")
   else if (a.files && a.files.length === 0) parts.push('The run has no open pull request: its work changes no files yet, so it touches no component.')
   else if (a.files) {

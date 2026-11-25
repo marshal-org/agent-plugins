@@ -2,6 +2,7 @@
 // its plain-words read-back, the decision guard, the journal entry cap. No
 // engine calls.
 
+import { mib, nextClass } from '../hooks/autopilot-engine'
 import { expect, test } from 'claude-code/testing'
 
 import { askBlock, decisionsBlock, guard, mentionProtect, parseModelJson, untrusted, type AskInput } from '../hooks/autopilot-decide'
@@ -294,4 +295,18 @@ test('US2: a question with no text is never answered, whatever the model says', 
   const v = guard(said, ask, rules)
   expect(v.kind).toBe('notify')
   expect(guard(said, { ...ask, question: 'Proceed with B?' }, rules).kind).toBe('answer')
+})
+
+test('next compute class after an out-of-memory stop', () => {
+  expect(mib('memory limit 4608Mi).')).toBe(4608)
+  expect(mib('6Gi')).toBe(6144)
+  const k = [
+    { id: 'a', slug: 'a', memMi: 4608, storage: 'pvc/local-path' },
+    { id: 'b', slug: 'b', memMi: 6144, storage: 'ephemeral/' },
+    { id: 'c', slug: 'c', memMi: 6144, storage: 'pvc/local-path' },
+  ]
+  expect(nextClass(k, 4608)?.id).toBe('c')
+  // An unknown starting class takes the smallest larger one.
+  expect(nextClass(k, 4000)?.id).toBe('a')
+  expect(nextClass(k, 6144)).toBeUndefined()
 })

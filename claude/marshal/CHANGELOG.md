@@ -3,6 +3,20 @@
 Each release of the `marshal` plugin, newest first. The release on GitHub
 (`marshal-v<version>`) shows the section for its version.
 
+## 0.7.1
+
+- Changing a Marshal Autopilot setting during setup no longer resets the mode: a setup that
+  leaves the mode out keeps the one in force.
+- Autopilot resumes a run that ran out of memory on the next compute class up (the same kind
+  of storage, so its work carries over), with a note to do less at once, even before the run
+  opened a pull request.
+- Autopilot's decision gets the full name of every repository your runs work in, so a short
+  reference such as "marshal#3013" is read from the right repository instead of guessed.
+- One Autopilot per machine: when several Claude Code sessions have the plugin, one leads and
+  the others stand by (the strip says so). A session that closes hands over within 90 seconds.
+  Before, every session decided every question and took care of every run.
+- A run is messaged at most once per question, however often Autopilot decides it again.
+
 ## 0.7.0
 
 Marshal Autopilot does what the orchestrate watcher did (#3016):

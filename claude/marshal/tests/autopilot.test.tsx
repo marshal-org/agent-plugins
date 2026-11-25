@@ -1587,3 +1587,82 @@ test('#3016 Q7: a policy server that connects later is picked up on the next pol
   await w.clock.advance(25_000)
   expect(w.calls.some(c => c.server === 'marshal-two' && c.tool === 'runs_attention')).toBe(true)
 })
+
+test('setup that leaves the mode out keeps the mode in force', async ($, on) => {
+  const w = world(on, { files: { [POLICY]: policyYaml({ mode: 'cruise', mergeBar: true }) } })
+  await start($, w)
+  const r = await tool($, 'autopilot_setup', { confirm: true, merge_bar_words: 'two AI reviews' })
+  expect((r.read_back as string[])[0]).toBe('Mode cruise. On.')
+  expect(w.files.get(POLICY)!.text).toContain('mode: cruise')
+})
+
+test('#3016 Q4: a run that ran out of memory is resumed on the next class up, same storage', async ($, on) => {
+  const oom = { id: 'run-o', state: 'failed', title: '#7 work', deputy: 'shipper', stop_reason: 'out_of_memory', created_at: '2026-11-16T09:00:00Z', completed_at: new Date(NOW - 5 * 60_000).toISOString() }
+  const classes = [
+    { id: 'c-lm', slug: 'large-memory', memory_limit: '4608Mi', storage_mode: 'pvc', storage_class_name: 'local-path' },
+    { id: 'c-xl-eph', slug: 'xlarge', memory_limit: '6Gi', storage_mode: 'ephemeral' },
+    { id: 'c-xl-pvc', slug: 'extra-large', memory_limit: '6Gi', storage_mode: 'pvc', storage_class_name: 'local-path' },
+    { id: 'c-2xl', slug: '2x-large', memory_limit: '12Gi', storage_mode: 'pvc', storage_class_name: 'local-path' },
+  ]
+  const w = world(on, {
+    files: { [POLICY]: policyYaml({ mode: 'cruise', extra: 'care:\n  extend_timeouts: false' }) },
+    tools: toolsFor(SERVER, ['runs_continue', 'runs_continuation', 'compute_classes_list']),
+    mcp: c => {
+      if (c.tool === 'runs_attention') return text({ since: '2026-11-16T09:00:00Z', asks: [], runs: [oom] })
+      if (c.tool === 'runs_get') return text({ id: 'run-o', result: 'error: the agent container ran out of memory (memory limit 4608Mi). Give the run a larger compute class.' })
+      if (c.tool === 'compute_classes_list') return text(classes)
+      if (c.tool === 'runs_continue') return text({ id: 'run-o2', status: 'pending' })
+      return undefined
+    },
+  })
+  await start($, w)
+  const cont = w.calls.filter(c => c.tool === 'runs_continue')
+  expect(cont.map(c => c.args.compute_class_id)).toEqual(['c-xl-pvc'])
+  expect(String(cont[0]!.args.task)).toContain('You now run on the extra-large class')
+})
+
+test('#3016: the decision gets the full names of the repositories the runs work in', async ($, on) => {
+  const other = { id: 'run-other', state: 'running', title: '#5 other', deputy: 'shipper', created_at: '2026-11-16T09:00:00Z' }
+  const w = world(on, {
+    asks: [PLAN],
+    runs: [other],
+    files: { [POLICY]: policyYaml({ mode: 'cruise', extra: 'care:\n  extend_timeouts: false' }) },
+    model: () => decision({ gate: 'approve_plan' }),
+    mcp: c => (c.tool === 'runs_prs' && c.args.run_id === 'run-other' ? text(prEvents('acme-org/app', 5)) : undefined),
+  })
+  await start($, w)
+  expect(w.prompts[0]!.prompt).toContain("Repositories the person's runs work in, by full name (use these for reads; \"name#N\" means the one whose name matches): acme-org/app")
+})
+
+test('one Autopilot per machine: a session stands by while another leads, and takes over when it goes quiet', async ($, on) => {
+  const lock = `${DATA}/leader.json`
+  const w = world(on, {
+    asks: [PROCEED],
+    files: { [POLICY]: policyYaml({ mode: 'routine' }), [lock]: JSON.stringify({ id: 'other-session', at: NOW }) },
+    model: byKind([PROCEED]),
+  })
+  await start($, w)
+  expect(w.prompts).toHaveLength(0)
+  expect(w.answers()).toHaveLength(0)
+  const ui = await $.ui.mount({ ...FLEET, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /runs in another Claude Code session/ })).toBeDefined()
+  await ui.unmount()
+  // The other session stops renewing: after 90 s this one leads.
+  await w.clock.advance(100_000)
+  expect(w.answers().map(c => c.args.ask_id)).toEqual(['proceed'])
+  expect(JSON.parse(w.files.get(lock)!.text).id).not.toBe('other-session')
+})
+
+test('#3016: the run is messaged at most once per question, across re-decisions', async ($, on) => {
+  const w = world(on, {
+    asks: [PLAN],
+    files: { [POLICY]: policyYaml({ mode: 'cruise' }) },
+    model: prompt =>
+      prompt.includes('READS SO FAR')
+        ? reply({ gate: 'approve_plan', outcome: 'wait', reasoning: 'waiting for the run' })
+        : reply({ read: { tool: 'message_run', args: { text: 'Send the brief as text.' } } }),
+  })
+  await start($, w)
+  await w.clock.advance(11 * 60_000)
+  expect(w.calls.filter(c => c.tool === 'runs_message')).toHaveLength(1)
+})

@@ -188,7 +188,9 @@ export async function runTool($: EngineInterface, name: string, args: Args, env:
     }
     case 'autopilot_setup': {
       const base = cur.policy ?? newPolicy(env.server)
-      const mode = typeof args.mode === 'string' ? args.mode : 'shadow'
+      // A mode left out keeps the one in force (Shadow for a new policy): a
+      // setup call changes only what it was given.
+      const mode = typeof args.mode === 'string' && args.mode ? args.mode : base.mode
       const lim = (args.limits && typeof args.limits === 'object' ? args.limits : {}) as Args
       const raw = {
         version: 1,

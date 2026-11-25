@@ -5,6 +5,7 @@ import type { AutopilotEntry, AutopilotOutcome, AutopilotView, Fleet, FleetAsk, 
 import { decide, type AskInput, type Verdict } from './autopilot-decide'
 import { PR_REREAD_MS, PRS_PER_CYCLE, failureHash, nudgeText, readFailedLog, readRollup, redact, tailOf, watch, type PrWatch } from './autopilot-checks'
 import { mergeBar, prFiles } from './autopilot-github'
+import { dataDir, readText, writePrivate } from './autopilot-files'
 import { journal, loadJournal, record, recentEntries, seen, type JournalEntry } from './autopilot-journal'
 import {
   activeRules,
@@ -56,6 +57,46 @@ export const ap = {
   pollMs: 20_000,
   // The answers given this session, for the "answered" toast.
   lastCycleAt: 0,
+  // This session's id for the leader lock (one Autopilot per machine).
+  sessionId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+  // Asks whose run Autopilot already messaged: at most one message per ask.
+  messagedAsks: new Set<string>(),
+  // This session stood by on the last cycle (another session led).
+  standby: false,
+}
+
+// One Autopilot per machine: every Claude Code session with the plugin runs
+// the hooks, and they share the policy and the journal. The session holding
+// leader.json decides and acts; the others stand by. A leader that stops
+// renewing (closed session) is taken over after LEAD_STALE_MS.
+export const LEAD_STALE_MS = 90_000
+
+export async function leads($: EngineInterface, now: number): Promise<boolean> {
+  let path = ''
+  try {
+    path = `${await dataDir($)}/leader.json`
+  } catch {
+    return true
+  }
+  const read = async () => {
+    try {
+      const v = JSON.parse((await readText($, path)) ?? '') as { id?: unknown; at?: unknown }
+      return { id: typeof v.id === 'string' ? v.id : '', at: typeof v.at === 'number' ? v.at : 0 }
+    } catch {
+      return { id: '', at: 0 }
+    }
+  }
+  const cur = await read()
+  if (cur.id && cur.id !== ap.sessionId && now - cur.at < LEAD_STALE_MS) return false
+  try {
+    await writePrivate($, path, JSON.stringify({ id: ap.sessionId, at: now }))
+  } catch {
+    // Cannot write the lock (no shell): act alone, as before.
+    return true
+  }
+  // Two sessions that wrote at once: the one whose write stayed leads.
+  const after = await read()
+  return !after.id || after.id === ap.sessionId
 }
 
 export function resetEngine(): void {
@@ -223,6 +264,16 @@ function runRepos(cell: FleetCell, runId: string): string[] {
   return [...new Set((runOf(cell, runId)?.prs ?? []).map(p => p.repo).filter(r => r !== ''))]
 }
 
+// Every repository the server's runs have pull requests in, plus the ones the
+// policy names: the full names a short "name#N" reference resolves to.
+function knownRepos(c: Cycle, cell: FleetCell): string[] {
+  const out = new Set<string>()
+  for (const r of [...cell.attention, ...cell.active, ...cell.recent]) for (const p of r.prs ?? []) if (p.repo) out.add(p.repo)
+  for (const r of c.policy.watchRepos) out.add(r)
+  for (const k of c.policy.components) if (k.repo) out.add(k.repo)
+  return [...out].sort().slice(0, 30)
+}
+
 // What the decision gets for one ask.
 async function gather($: EngineInterface, c: Cycle, cell: FleetCell, a: FleetAsk, apc: ApCell) {
   const read = await readAsk($, cell.server, a, apc)
@@ -239,6 +290,7 @@ async function gather($: EngineInterface, c: Cycle, cell: FleetCell, a: FleetAsk
     choices: read.input.choices ?? exactChoices(a),
     allowFreeText: read.input.allowFreeText ?? (a.choices.length === 0 && a.rung !== 'approve'),
     repos: [...new Set(prs.map(p => p.repo))],
+    knownRepos: knownRepos(c, cell),
   }
   // Component rules need what the run's work changes: its pull requests'
   // files, read with the person's gh. A server without runs_prs, or a PR
@@ -351,6 +403,8 @@ async function decideOne($: EngineInterface, c: Cycle, cell: FleetCell, a: Fleet
   }
   // The train's decisions, read again before every decision (FR-021).
   const decisions = c.overlay ? [...c.overlay.decisions, ...(await readDecisions($, c.overlay.train))] : []
+  // The run is messaged at most once per ask, across re-decisions.
+  const readCtx = { server: cell.server, runId: a.runId, hasMessage: apc.hasMessage, hasLogs: apc.hasLogs === true, messaged: ap.messagedAsks.has(a.askId) }
   const verdict = await decide($, input, {
     model: c.policy.model,
     rules: c.rules,
@@ -359,8 +413,9 @@ async function decideOne($: EngineInterface, c: Cycle, cell: FleetCell, a: Fleet
     mode: c.policy.mode,
     mergeBarWords: c.policy.mergeBar ? c.policy.mergeBarWords : '',
     // In a space the asks are its children's: reads stay off there.
-    ...(!apc.hasChildAsks && { read: { server: cell.server, runId: a.runId, hasMessage: apc.hasMessage, hasLogs: apc.hasLogs === true, messaged: false } }),
+    ...(!apc.hasChildAsks && { read: readCtx }),
   })
+  if (readCtx.messaged) ap.messagedAsks.add(a.askId)
   c.handled.add(a.askId)
   // The journal and the strip show the choices collapsed; the answer sent is
   // the exact choice text.
@@ -641,6 +696,41 @@ export function resumeTask(why: string, pr: FleetPr | undefined): string {
   return `Marshal Autopilot: your last segment ended (${why}). RESUME ${which}; do not start over. Re-derive the state first, then continue to the next gate.`
 }
 
+// Memory in MiB from "4608Mi", "6Gi" or "4608Mi" inside a sentence.
+export function mib(s: string): number {
+  const m = /(\d+(?:\.\d+)?)\s*(Mi|Gi)\b/.exec(s)
+  if (!m) return 0
+  return Math.round(Number(m[1]) * (m[2] === 'Gi' ? 1024 : 1))
+}
+
+type ComputeClass = { id: string; slug: string; memMi: number; storage: string }
+
+// After an out-of-memory stop Marshal continues a run only on a named class.
+// The next class up: the smallest with more memory than the limit the run
+// died at, on the same kind of storage as the class it ran on (found by that
+// limit) so its working tree carries over; any larger class otherwise.
+export function nextClass(classes: readonly ComputeClass[], diedAtMi: number): ComputeClass | undefined {
+  const was = classes.find(k => k.memMi === diedAtMi)
+  const bigger = classes.filter(k => k.memMi > diedAtMi).sort((a, b) => a.memMi - b.memMi)
+  return (was ? bigger.find(k => k.storage === was.storage) : undefined) ?? bigger[0]
+}
+
+async function biggerClass($: EngineInterface, server: string, runId: string): Promise<ComputeClass | undefined> {
+  try {
+    const run = resultJson(await $.mcp.call(server, 'runs_get', { run_id: runId, brief: true })) as { result?: unknown }
+    const died = mib(plainText(run.result))
+    if (!died) return undefined
+    const list = resultJson(await $.mcp.call(server, 'compute_classes_list', {}))
+    const classes = (Array.isArray(list) ? list : []).map(k => {
+      const o = (k && typeof k === 'object' ? k : {}) as Record<string, unknown>
+      return { id: String(o.id ?? ''), slug: String(o.slug ?? ''), memMi: mib(String(o.memory_limit ?? '')), storage: `${String(o.storage_mode ?? '')}/${String(o.storage_class_name ?? '')}` }
+    }).filter(k => k.id && k.memMi > 0)
+    return nextClass(classes, died)
+  } catch {
+    return undefined
+  }
+}
+
 async function resumeRun($: EngineInterface, c: Cycle, cell: FleetCell, apc: ApCell, r: FleetRun, why: string): Promise<void> {
   const label = r.title || r.id.slice(0, 8)
   if (lastCare(r.id, 'resume')) return
@@ -654,9 +744,19 @@ async function resumeRun($: EngineInterface, c: Cycle, cell: FleetCell, apc: ApC
     await record($, careEntry(c, cell.server, r, 'notified', 'resume', `Shadow: would resume it (${why})`))
     return
   }
+  // Out of memory: resume on the next class up, with a note to do less at once.
+  const oom = /out.of.memory/i.test(`${r.stopReason} ${why}`)
+  const bigger = oom ? await biggerClass($, cell.server, r.id) : undefined
+  if (oom && !bigger) {
+    await record($, careEntry(c, cell.server, r, 'notified', 'resume', `ended out of memory and no larger compute class was found`))
+    checkNotice(c, label, 'ended out of memory; no larger compute class to resume it on')
+    return
+  }
+  const args: Record<string, unknown> = { run_id: r.id, task: resumeTask(why, pr) + (bigger ? ` You now run on the ${bigger.slug} class; do less at once (one package at a time).` : '') }
+  if (bigger) args.compute_class_id = bigger.id
   try {
-    resultJson(await $.mcp.call(cell.server, 'runs_continue', { run_id: r.id, task: resumeTask(why, pr) }))
-    await record($, careEntry(c, cell.server, r, 'cared', 'resume', `resumed it (${why})`))
+    resultJson(await $.mcp.call(cell.server, 'runs_continue', args))
+    await record($, careEntry(c, cell.server, r, 'cared', 'resume', `resumed it (${why})${bigger ? ` on ${bigger.slug}` : ''}`))
   } catch (err) {
     const e = firstLine(err instanceof Error ? err.message : String(err))
     await record($, careEntry(c, cell.server, r, 'notified', 'resume', `could not resume it: ${e}`))
@@ -730,7 +830,9 @@ async function careRuns($: EngineInterface, c: Cycle, cell: FleetCell, apc: ApCe
       }
       continue
     }
-    if (!(r.prs ?? []).some(p => p.state === 'open')) continue
+    // A run that ran out of memory is resumed even before it opened a PR:
+    // its work is in the workspace, which carries over.
+    if (!(r.prs ?? []).some(p => p.state === 'open') && !/out.of.memory/i.test(r.stopReason)) continue
     await resumeRun($, c, cell, apc, r, `${r.state}${r.stopReason ? `: ${r.stopReason}` : ''}`)
   }
 }
@@ -754,6 +856,20 @@ export async function autopilotCycle($: EngineInterface, input: CycleInput): Pro
     return handled
   }
   const policy = loaded.policy
+  // Another session on this machine runs Autopilot: stand by. The journal
+  // it writes is read again when this session takes over.
+  if (!ap.spaceHosted && !(await leads($, now))) {
+    ap.standby = true
+    await setView($, { ...EMPTY_AUTOPILOT, state: policy.enabled ? (policy.paused ? 'paused' : 'on') : 'off', reason: 'runs in another Claude Code session on this machine; this one stands by', mode: policy.mode })
+    return handled
+  }
+  if (ap.standby) {
+    // Taking over: read the journal again, with what the other session wrote.
+    ap.standby = false
+    journal.loaded = false
+    journal.byAsk.clear()
+    journal.checks = []
+  }
   await loadJournal($, now, policy.limits.journalDays)
   if (!policy.enabled) {
     await view($, 'off', 'stopped. Press s or ask Claude to turn Marshal Autopilot on.', policy.mode, loaded.mtime, input.next)
