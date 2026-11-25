@@ -114,7 +114,7 @@ export type Answering = { server: string; askId: string } | null
 // ── Autopilot ────────────────────────────────────────────────────────────────
 
 // What Autopilot decided about one ask, as the strip and explain show it.
-export type AutopilotOutcome = 'answered' | 'would_answer' | 'notified' | 'answered_elsewhere' | 'refused' | 'escalated' | 'nudged'
+export type AutopilotOutcome = 'answered' | 'would_answer' | 'notified' | 'answered_elsewhere' | 'refused' | 'escalated' | 'nudged' | 'waiting' | 'cared'
 
 export type AutopilotEntry = {
   askId: string

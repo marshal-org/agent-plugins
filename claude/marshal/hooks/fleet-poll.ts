@@ -38,6 +38,10 @@ export type Cell = {
   hasInboxGet?: boolean
   hasDeputyQueue?: boolean
   hasMessage?: boolean
+  hasLogs?: boolean
+  hasTimeout?: boolean
+  hasContinue?: boolean
+  hasStop?: boolean
   hasChildAsks?: boolean
 }
 
@@ -176,6 +180,10 @@ export async function pollFleet($: EngineInterface, cells: readonly Cell[], noti
         hasInboxGet: c.hasInboxGet === true || c.hasChildAsks === true,
         hasQueue: c.hasDeputyQueue === true,
         hasMessage: c.hasMessage === true,
+        hasLogs: c.hasLogs === true,
+        hasTimeout: c.hasTimeout === true,
+        hasContinue: c.hasContinue === true,
+        hasStop: c.hasStop === true,
         hasChildAsks: c.hasChildAsks === true,
       })),
     })

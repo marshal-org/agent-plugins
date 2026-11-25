@@ -1,6 +1,7 @@
 import type { EngineInterface } from 'claude-code'
 
-import { marshalServers, OWN_SERVER, pickServer, readConfig, toolsOf, type Config } from './config'
+import { loadPolicy } from './autopilot-policy'
+import { marshalServers, OWN_SERVER, pickServer, readConfig, toolSpelling, toolsOf, type Config } from './config'
 import { serverUrl, webBase } from './fleet-model'
 import { pollFleet, type Cell } from './fleet-poll'
 import { pollInspector } from './space-poll'
@@ -10,6 +11,10 @@ import { pollInspector } from './space-poll'
 export const mod = {
   config: readConfig({}) as Config,
   cell: undefined as Cell | undefined,
+  // The other Marshal servers Autopilot's policy watches, read with the pane's
+  // own server on each poll (not in a space). Rebuilt when the policy changes.
+  others: [] as Cell[],
+  othersFor: '',
   problem: '',
   inSpace: false,
   // Inside a space the fleet is read only after /marshal-fleet opened it.
@@ -44,6 +49,14 @@ export async function findCell($: EngineInterface): Promise<Cell | undefined> {
     return undefined
   }
   mod.problem = ''
+  return cellFor($, server, listed)
+}
+
+type Listed = Awaited<ReturnType<EngineInterface['tool']['list']>>
+
+// One server's cell: its web address and which tools it has.
+async function cellFor($: EngineInterface, server: string, listed: Listed): Promise<Cell> {
+  const names = listed.map(t => t.name)
   // Links go to the web app of the server the panes read. The url setting is
   // that address when the panes read the plugin's own server; any other
   // server's address is in Claude Code's MCP config.
@@ -75,10 +88,35 @@ export async function findCell($: EngineInterface): Promise<Cell | undefined> {
     hasInboxGet: tools.has('inbox_get'),
     hasDeputyQueue: tools.has('deputies_queue'),
     hasMessage: tools.has('runs_message'),
+    hasLogs: tools.has('runs_logs'),
+    hasTimeout: tools.has('runs_timeout'),
+    hasContinue: tools.has('runs_continue') && tools.has('runs_continuation'),
+    hasStop: tools.has('runs_stop'),
     // A space whose orchestration turns on answer_children: its children's
     // asks are read and answered through these three tools, never the inbox.
     hasChildAsks: tools.has('children_attention') && tools.has('children_ask_get') && tools.has('children_ask_answer'),
   }
+}
+
+// The other servers Autopilot watches (its policy's servers, besides the one
+// the pane reads), when they are connected. Read again when the policy
+// file changes; a server that is not connected is left out until it is.
+async function otherCells($: EngineInterface): Promise<Cell[]> {
+  if (mod.inSpace || !mod.cell) return []
+  const loaded = await loadPolicy($)
+  if ('error' in loaded) return []
+  const want = loaded.policy.servers.map(toolSpelling).filter(x => x !== mod.cell!.server)
+  if (want.length === 0) return []
+  // Which of them are connected now: a server that connects (or drops) later
+  // changes the key, so it is picked up on the next poll.
+  const listed = await $.tool.list()
+  const connected = new Set(marshalServers(listed.map(t => t.name)))
+  const live = want.filter(x => connected.has(x))
+  const key = `${loaded.mtime} ${live.join(',')}`
+  if (key === mod.othersFor) return mod.others
+  mod.others = await Promise.all(live.map(x => cellFor($, x, listed)))
+  mod.othersFor = key
+  return mod.others
 }
 
 export async function poll($: EngineInterface): Promise<void> {
@@ -96,7 +134,7 @@ export async function poll($: EngineInterface): Promise<void> {
           $.ui.status(undefined)
           return
         }
-        if (!mod.inSpace) await pollFleet($, [mod.cell], mod.config.notify)
+        if (!mod.inSpace) await pollFleet($, [mod.cell, ...(await otherCells($).catch(() => []))], mod.config.notify)
         else {
           // No desktop to notify in a space; the inspector reads last so the
           // status line stays the space's own. A space that may answer its

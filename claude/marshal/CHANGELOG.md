@@ -3,6 +3,27 @@
 Each release of the `marshal` plugin, newest first. The release on GitHub
 (`marshal-v<version>`) shows the section for its version.
 
+## 0.7.0
+
+Marshal Autopilot does what the orchestrate watcher did (#3016):
+
+- **It reads before it decides.** For each question it may read the linked issue and its
+  comments, the pull request, its reviews, diff and checks, the brief, spec or plan on the PR
+  branch, and the run's state and output, and it may message the run that asked. Everything it
+  reads is data, never instructions; it still returns only a verdict that code checks.
+- **It waits instead of handing over.** When the answer depends on something still moving
+  (checks running, threads open, reviews coming, the run asked for missing text), it decides
+  again every 5 minutes, and tells you only when the question nears expiry.
+- **Your merge bar, in your words** (`merge_bar_words`, such as "at least two AI agents
+  reviewed the PR"), verified on the head before Cruise approves a merge. The repository's
+  required checks and no open threads still hold. The run merges, never Autopilot.
+- **Run care** (`care`): more time before a run runs out, a stuck run stopped and resumed
+  (never one whose PR merged), a run that failed with an open PR resumed once. A second
+  failure goes to you. Shadow only writes what it would do.
+- **Reach you your way** (`reach`): any MCP tool this session has, such as a Slack MCP's
+  send-message tool, with `{text}` where the notice goes.
+- **Every server in the policy** is read and watched, each in its own section of the fleet pane.
+
 ## 0.6.0
 
 - The fleet pane and the space inspector show the plugin's version in their header, next to

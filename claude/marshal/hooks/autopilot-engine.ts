@@ -37,6 +37,10 @@ export type ApCell = {
   hasInboxGet: boolean
   hasQueue: boolean
   hasMessage: boolean
+  hasLogs?: boolean
+  hasTimeout?: boolean
+  hasContinue?: boolean
+  hasStop?: boolean
   // In a space with answer_children: read with children_ask_get, answer with
   // children_ask_answer. The space has no inbox tools and no deputies_queue.
   hasChildAsks?: boolean
@@ -60,6 +64,9 @@ export function resetEngine(): void {
 }
 
 const OPEN = new Set(['pending', 'claimed', ''])
+
+// A question Autopilot waits on is decided again this often while it is open.
+export const RECHECK_MS = 5 * 60_000
 
 type Notice = { text: string; urgent: boolean }
 
@@ -316,6 +323,9 @@ async function holdBack($: EngineInterface, c: Cycle, cell: FleetCell, a: FleetA
   return ''
 }
 
+// Merge-bar failures that can still clear on their own while the ask is open.
+const WAITABLE = /required checks not passing|unresolved|required reviews are not given|is a draft|moved while it was checked|could not read/
+
 async function decideOne($: EngineInterface, c: Cycle, cell: FleetCell, a: FleetAsk, apc: ApCell): Promise<void> {
   const { input, read, prs } = await gather($, c, cell, a, apc)
   if (read.status && !OPEN.has(read.status)) {
@@ -341,11 +351,25 @@ async function decideOne($: EngineInterface, c: Cycle, cell: FleetCell, a: Fleet
   }
   // The train's decisions, read again before every decision (FR-021).
   const decisions = c.overlay ? [...c.overlay.decisions, ...(await readDecisions($, c.overlay.train))] : []
-  const verdict = await decide($, input, { model: c.policy.model, rules: c.rules, components: c.policy.components, decisions, mode: c.policy.mode })
+  const verdict = await decide($, input, {
+    model: c.policy.model,
+    rules: c.rules,
+    components: c.policy.components,
+    decisions,
+    mode: c.policy.mode,
+    mergeBarWords: c.policy.mergeBar ? c.policy.mergeBarWords : '',
+    // In a space the asks are its children's: reads stay off there.
+    ...(!apc.hasChildAsks && { read: { server: cell.server, runId: a.runId, hasMessage: apc.hasMessage, hasLogs: apc.hasLogs === true, messaged: false } }),
+  })
   c.handled.add(a.askId)
   // The journal and the strip show the choices collapsed; the answer sent is
   // the exact choice text.
   const asked = { ...a, question: input.question, choices: read.shown ?? a.choices }
+  if (verdict.kind === 'wait') {
+    // Decided again on a later check; the person hears only near expiry.
+    await record($, entry(c, cell, asked, 'waiting', verdict))
+    return
+  }
   if (verdict.kind === 'notify') {
     const left = expiresInMin(a, c.now)
     const near = left !== undefined && left < c.policy.limits.expiryMinutes
@@ -359,6 +383,12 @@ async function decideOne($: EngineInterface, c: Cycle, cell: FleetCell, a: Fleet
   }
   const why = await holdBack($, c, cell, a, verdict, apc, prs)
   if (why) {
+    // A bar that can still be met (checks running, threads open, reviews
+    // coming) is waited on, not handed to the person.
+    if (verdict.gate === 'approve_merge' && WAITABLE.test(why)) {
+      await record($, entry(c, cell, asked, 'waiting', { ...verdict, reason: why }))
+      return
+    }
     await record($, entry(c, cell, asked, 'notified', { ...verdict, reason: why }))
     notify(c, a, why)
     return
@@ -400,7 +430,21 @@ async function captureAnswers($: EngineInterface, c: Cycle, prevCell: FleetCell 
   }
 }
 
-function deliver($: EngineInterface, c: Cycle, desktop: boolean): void {
+// The person's other channels (policy reach): each notice goes out once,
+// through the tool they named, with "{text}" replaced by the notice. A
+// channel that fails is told in a toast and never blocks the cycle.
+async function reachOut($: EngineInterface, c: Cycle, text: string): Promise<void> {
+  for (const r of c.policy.reach) {
+    const args = Object.fromEntries(Object.entries(r.args).map(([k, v]) => [k, v.split('{text}').join(text)]))
+    try {
+      await $.mcp.call(r.server, r.tool, args)
+    } catch (err) {
+      $.ui.toast(`Autopilot could not reach you through ${r.says || `${r.server} ${r.tool}`}: ${cut(firstLine(err instanceof Error ? err.message : String(err)), 120)}`, { timeoutMs: 8000 })
+    }
+  }
+}
+
+async function deliver($: EngineInterface, c: Cycle, desktop: boolean): Promise<void> {
   const group = c.policy.limits.notifyGroupOver
   if (c.notices.length === 0) return
   if (c.notices.length > group) {
@@ -408,19 +452,24 @@ function deliver($: EngineInterface, c: Cycle, desktop: boolean): void {
     const text = `Autopilot: ${c.notices.length} questions wait on you${urgent ? `, ${urgent} close to expiry` : ''}. See the fleet pane.`
     $.ui.toast(text, { timeoutMs: 8000 })
     if (desktop) void $.ui.notify(text, { title: 'Marshal Autopilot' }).catch(() => undefined)
+    await reachOut($, c, text)
     return
   }
   for (const n of c.notices) {
     $.ui.toast(n.text, { timeoutMs: n.urgent ? 10000 : 8000 })
     if (desktop) void $.ui.notify(n.urgent ? `Expiring soon. ${n.text}` : n.text, { title: 'Marshal Autopilot' }).catch(() => undefined)
+    await reachOut($, c, n.urgent ? `Expiring soon. ${n.text}` : n.text)
   }
 }
 
 async function view($: EngineInterface, state: AutopilotView['state'], reason: string, mode: string, mtime: number, fleet: Fleet): Promise<void> {
   const open = new Set(fleet.cells.flatMap(c => c.asks.map(a => `${c.server} ${a.askId}`)))
   const all = recentEntries(200)
-  const nudges = journal.checks.filter(e => e.outcome === 'nudged').map(e => ({ ...e, ask_id: `check:${e.pr}:${e.check}`, answer: 'sent the failing log', ask: { ...e.ask, question: `${e.check} on ${e.pr}` } }))
-  const recent = [...all.filter(e => e.outcome === 'answered' || e.outcome === 'would_answer'), ...nudges]
+  const nudges = journal.checks
+    .filter(e => e.outcome === 'nudged' || e.outcome === 'cared')
+    .map(e => ({ ...e, ask_id: `check:${e.run_id}:${e.check}:${e.at}`, answer: e.outcome === 'nudged' ? 'sent the failing log' : '', ask: { ...e.ask, question: e.pr ? `${e.check} on ${e.pr}` : e.check ?? '' } }))
+  const waitingNow = all.filter(e => e.outcome === 'waiting' && open.has(`${e.server} ${e.ask_id}`))
+  const recent = [...all.filter(e => e.outcome === 'answered' || e.outcome === 'would_answer'), ...waitingNow, ...nudges]
     .sort((a, b) => b.at - a.at)
     .slice(0, 6)
     .map(entryOf)
@@ -563,6 +612,129 @@ async function watchRuns($: EngineInterface, c: Cycle, cell: FleetCell, apc: ApC
   }
 }
 
+// ── Run care (policy care) ───────────────────────────────────────────────────
+// What the orchestrate watcher did for runs, by the person's switches: add
+// time before a run runs out, stop a run that is stuck (never one whose pull
+// request merged) and resume it, resume a run that ended failed or timed out
+// with an open pull request. Each run is resumed at most once; a second
+// failure goes to the person. Shadow only writes what it would do.
+
+export const EXTEND_EVERY_MS = 90 * 60_000
+export const EXTEND_SECS = 2 * 3600
+// Only runs that ended this recently are resumed (not old failures).
+export const RESUME_WINDOW_MS = 2 * 3600_000
+const ENDED_BAD = new Set(['failed', 'timed_out'])
+
+function lastCare(runId: string, check: string): number {
+  let at = 0
+  for (const e of journal.checks) if (e.run_id === runId && e.check === check && e.at > at) at = e.at
+  return at
+}
+
+function careEntry(c: Cycle, server: string, r: FleetRun, outcome: AutopilotOutcome, check: string, reason: string): JournalEntry {
+  const w: PrWatch = { key: '', server, runId: r.id, repo: '', number: 0, readAt: 0, head: '', ids: new Map(), skipped: '' }
+  return { ...checkEntry(c, w, r.title || r.id.slice(0, 8), outcome, check, reason), pr: '' }
+}
+
+export function resumeTask(why: string, pr: FleetPr | undefined): string {
+  const which = pr ? `the existing pull request ${pr.repo}#${pr.number}` : 'your existing work'
+  return `Marshal Autopilot: your last segment ended (${why}). RESUME ${which}; do not start over. Re-derive the state first, then continue to the next gate.`
+}
+
+async function resumeRun($: EngineInterface, c: Cycle, cell: FleetCell, apc: ApCell, r: FleetRun, why: string): Promise<void> {
+  const label = r.title || r.id.slice(0, 8)
+  if (lastCare(r.id, 'resume')) return
+  const pr = (r.prs ?? []).find(p => p.state === 'open')
+  if (!c.policy.care.relaunch || !apc.hasContinue) {
+    await record($, careEntry(c, cell.server, r, 'notified', 'resume', `ended (${why}); ${apc.hasContinue ? 'resuming is off' : 'this server cannot continue runs'}`))
+    checkNotice(c, label, `ended (${why})${pr ? ` with ${pr.repo}#${pr.number} open` : ''}; resume it`)
+    return
+  }
+  if (c.policy.mode === 'shadow') {
+    await record($, careEntry(c, cell.server, r, 'notified', 'resume', `Shadow: would resume it (${why})`))
+    return
+  }
+  try {
+    resultJson(await $.mcp.call(cell.server, 'runs_continue', { run_id: r.id, task: resumeTask(why, pr) }))
+    await record($, careEntry(c, cell.server, r, 'cared', 'resume', `resumed it (${why})`))
+  } catch (err) {
+    const e = firstLine(err instanceof Error ? err.message : String(err))
+    await record($, careEntry(c, cell.server, r, 'notified', 'resume', `could not resume it: ${e}`))
+    checkNotice(c, label, `ended (${why}) and Autopilot could not resume it: ${cut(e, 100)}`)
+  }
+}
+
+async function careRuns($: EngineInterface, c: Cycle, cell: FleetCell, apc: ApCell): Promise<void> {
+  const care = c.policy.care
+  const shadow = c.policy.mode === 'shadow'
+  const watched = (r: FleetRun) => !c.policy.watchDeputies.length || c.policy.watchDeputies.includes(r.deputy)
+  const running = cell.active.filter(r => r.state === 'running' && watched(r))
+  const asking = new Set(cell.asks.map(a => a.runId))
+
+  if (care.extendTimeouts && apc.hasTimeout) {
+    for (const r of running) {
+      if (c.now - lastCare(r.id, 'extend') < EXTEND_EVERY_MS) continue
+      if (shadow) {
+        await record($, careEntry(c, cell.server, r, 'notified', 'extend', 'Shadow: would add 2 hours to its time budget'))
+        continue
+      }
+      try {
+        resultJson(await $.mcp.call(cell.server, 'runs_timeout', { run_id: r.id, action: 'add', add_secs: EXTEND_SECS }))
+        await record($, careEntry(c, cell.server, r, 'cared', 'extend', 'added 2 hours to its time budget'))
+      } catch (err) {
+        await record($, careEntry(c, cell.server, r, 'notified', 'extend', `could not add time: ${firstLine(err instanceof Error ? err.message : String(err))}`))
+      }
+    }
+  }
+
+  if (care.stopStuck && apc.hasStop) {
+    const limit = 2 * c.policy.limits.silenceMinutes * 60_000
+    for (const r of running) {
+      const seenRun = watch.runs.get(r.id)
+      if (!seenRun || c.now - seenRun.since < limit || asking.has(r.id) || lastCare(r.id, 'stop')) continue
+      const minutes = Math.round((c.now - seenRun.since) / 60_000)
+      const label = r.title || r.id.slice(0, 8)
+      // Marshal records any outside stop as canceled, even after a merge:
+      // a run whose pull request merged is never stopped.
+      if ((r.prs ?? []).some(p => p.state === 'merged')) {
+        await record($, careEntry(c, cell.server, r, 'notified', 'stop', `silent ${minutes} minutes, but its pull request merged: not stopped`))
+        checkNotice(c, label, `silent ${minutes} minutes after its pull request merged; not stopped`)
+        continue
+      }
+      if (shadow) {
+        await record($, careEntry(c, cell.server, r, 'notified', 'stop', `Shadow: would stop it (silent ${minutes} minutes) and resume it`))
+        continue
+      }
+      try {
+        resultJson(await $.mcp.call(cell.server, 'runs_stop', { run_id: r.id }))
+        await record($, careEntry(c, cell.server, r, 'cared', 'stop', `stopped it: silent ${minutes} minutes with no question`))
+      } catch (err) {
+        await record($, careEntry(c, cell.server, r, 'notified', 'stop', `could not stop it: ${firstLine(err instanceof Error ? err.message : String(err))}`))
+        checkNotice(c, label, `stuck (silent ${minutes} minutes) and Autopilot could not stop it`)
+        continue
+      }
+      await resumeRun($, c, cell, apc, r, `stuck, silent ${minutes} minutes; Autopilot stopped it`)
+    }
+  }
+
+  for (const r of [...cell.attention, ...cell.recent]) {
+    if (!ENDED_BAD.has(r.state) || !watched(r)) continue
+    const ended = Date.parse(r.completedAt)
+    if (!Number.isFinite(ended) || c.now - ended > RESUME_WINDOW_MS) continue
+    const resumedAt = lastCare(r.id, 'resume')
+    if (resumedAt) {
+      // Resumed once and ended badly again: the person's.
+      if (ended > resumedAt && !lastCare(r.id, 'resume-failed')) {
+        await record($, careEntry(c, cell.server, r, 'notified', 'resume-failed', `ended ${r.state} again after Autopilot resumed it`))
+        checkNotice(c, r.title || r.id.slice(0, 8), `ended ${r.state} again after Autopilot resumed it (${r.stopReason || 'no reason given'})`)
+      }
+      continue
+    }
+    if (!(r.prs ?? []).some(p => p.state === 'open')) continue
+    await resumeRun($, c, cell, apc, r, `${r.state}${r.stopReason ? `: ${r.stopReason}` : ''}`)
+  }
+}
+
 export type CycleInput = {
   prev: Fleet
   next: Fleet
@@ -597,7 +769,7 @@ export async function autopilotCycle($: EngineInterface, input: CycleInput): Pro
   }
   if (policy.paused) {
     await view($, 'paused', '', policy.mode, loaded.mtime, input.next)
-    deliver($, c, input.desktop && policy.notifyDesktop)
+    await deliver($, c, input.desktop && policy.notifyDesktop)
     return handled
   }
   // A train overlay that does not validate fails closed: its rules and
@@ -606,7 +778,7 @@ export async function autopilotCycle($: EngineInterface, input: CycleInput): Pro
   // the fleet tells the person of each question) until it is fixed.
   if (error) {
     await view($, 'paused', `answers nothing until the train overlay is fixed or the train is ended: ${error}`, policy.mode, loaded.mtime, input.next)
-    deliver($, c, input.desktop && policy.notifyDesktop)
+    await deliver($, c, input.desktop && policy.notifyDesktop)
     return handled
   }
   for (const cell of cells) {
@@ -620,6 +792,22 @@ export async function autopilotCycle($: EngineInterface, input: CycleInput): Pro
       if (policy.watchRepos.length && !runRepos(cell, a.runId).some(r => policy.watchRepos.includes(r))) continue
       const left = expiresInMin(a, now)
       const j = seen(a.askId)
+      if (j && j.outcome === 'waiting') {
+        // Waiting: near expiry it goes to the person; otherwise it is decided
+        // again once RECHECK_MS has passed.
+        if (left !== undefined && left < policy.limits.expiryMinutes && left > 0) {
+          await record($, { ...j, t: new Date(now).toISOString(), at: now, outcome: 'escalated', expires_in_min: Math.round(left), reason: `still waiting: ${j.reason}` })
+          notify(c, a, `still waiting: ${cut(j.reason, 100)}`, true, left)
+          handled.add(a.askId)
+          continue
+        }
+        if (now - j.at >= RECHECK_MS) {
+          fresh.push(a)
+          continue
+        }
+        handled.add(a.askId)
+        continue
+      }
       if (j) {
         // Decided before: escalate once when it nears expiry still open.
         if ((j.outcome === 'notified' || j.outcome === 'refused') && left !== undefined && left < policy.limits.expiryMinutes && left > 0 && j.expires_in_min === undefined) {
@@ -665,8 +853,13 @@ export async function autopilotCycle($: EngineInterface, input: CycleInput): Pro
     } catch {
       // Watching is best effort; it never blocks the asks.
     }
+    try {
+      await careRuns($, c, cell, apc)
+    } catch {
+      // Care is best effort too.
+    }
   }
-  deliver($, c, input.desktop && policy.notifyDesktop)
+  await deliver($, c, input.desktop && policy.notifyDesktop)
   await view($, 'on', error, policy.mode, loaded.mtime, input.next)
   ap.lastCycleAt = now
   return handled

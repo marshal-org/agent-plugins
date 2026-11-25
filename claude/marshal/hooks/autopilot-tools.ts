@@ -52,8 +52,15 @@ export const TOOL_SPECS = [
         servers: { ...strArr, description: 'Marshal MCP server names to watch, as /mcp lists them; empty: the one the fleet pane reads' },
         watch_deputies: { ...strArr, description: 'only these deputies (slugs); empty: all' },
         watch_repos: { ...strArr, description: 'only these repositories (owner/repo); empty: all' },
-        merge_bar: { type: 'boolean', description: "Cruise approves merges when the PR meets the repo's required checks, reviews and has no open threads" },
+        merge_bar: { type: 'boolean', description: "Cruise approves merges (the run merges); off: merges go to the person" },
+        merge_bar_words: { type: 'string', description: "the person's own merge bar in their words, e.g. 'at least two AI agents reviewed the PR'; Autopilot verifies it on the head before approving a merge. The repo's required checks and no open threads stay a floor. Empty: the repo's bar only" },
         notify_desktop: { type: 'boolean' },
+        reach: {
+          type: 'array',
+          items: { ...obj, properties: { server: { type: 'string' }, tool: { type: 'string' }, args: { ...obj }, says: { type: 'string' } } },
+          description: "other ways to reach the person, through tools this session has: [{ server, tool, args with {text} where the notice goes, says: the person's words }], e.g. a Slack MCP's send-message tool to their DM. Empty list: only this session (toasts, strip, desktop)",
+        },
+        care: { ...obj, properties: { extend_timeouts: { type: 'boolean' }, relaunch: { type: 'boolean' }, stop_stuck: { type: 'boolean' } }, description: 'taking care of runs; each on by default' },
         model: { type: 'string', description: 'model alias for decisions; default sonnet' },
         limits: { ...obj, properties: { answers_per_cycle: { type: 'number' }, expiry_minutes: { type: 'number' }, silence_minutes: { type: 'number' }, notify_group_over: { type: 'number' }, journal_days: { type: 'number' } } },
         confirm: { type: 'boolean' },
@@ -191,6 +198,9 @@ export async function runTool($: EngineInterface, name: string, args: Args, env:
         servers: strings(args.servers)?.length ? strings(args.servers) : base.servers.length ? base.servers : [env.server].filter(Boolean),
         watch: { deputies: strings(args.watch_deputies) ?? base.watchDeputies, repos: strings(args.watch_repos) ?? base.watchRepos },
         merge_bar: typeof args.merge_bar === 'boolean' ? args.merge_bar : base.mergeBar,
+        merge_bar_words: typeof args.merge_bar_words === 'string' ? args.merge_bar_words : base.mergeBarWords,
+        reach: Array.isArray(args.reach) ? args.reach : reachRaw(base),
+        care: { ...careRaw(base), ...(args.care && typeof args.care === 'object' ? (args.care as Args) : {}) },
         model: typeof args.model === 'string' && args.model ? args.model : base.model,
         notify: { desktop: typeof args.notify_desktop === 'boolean' ? args.notify_desktop : base.notifyDesktop },
         limits: {
@@ -317,6 +327,9 @@ function rawOf(p: Policy): Args {
     servers: p.servers,
     watch: { deputies: p.watchDeputies, repos: p.watchRepos },
     merge_bar: p.mergeBar,
+    merge_bar_words: p.mergeBarWords,
+    reach: reachRaw(p),
+    care: careRaw(p),
     model: p.model,
     notify: { desktop: p.notifyDesktop },
     limits: {
@@ -329,4 +342,12 @@ function rawOf(p: Policy): Args {
     components: p.components.map(c => ({ name: c.name, repo: c.repo, paths: c.paths, says: c.says })),
     rules: p.rules.map(r => ({ ...r })),
   }
+}
+
+function reachRaw(p: Policy): Args[] {
+  return p.reach.map(r => ({ server: r.server, tool: r.tool, args: { ...r.args }, ...(r.says && { says: r.says }) }))
+}
+
+function careRaw(p: Policy): Args {
+  return { extend_timeouts: p.care.extendTimeouts, relaunch: p.care.relaunch, stop_stuck: p.care.stopStuck }
 }

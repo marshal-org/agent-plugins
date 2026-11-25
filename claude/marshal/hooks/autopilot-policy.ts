@@ -20,6 +20,26 @@ export type Limits = {
   journalDays: number
 }
 
+// One way to reach the person, through a tool this session has: an MCP
+// server and tool (a Slack MCP's send, for example), with its arguments.
+// "{text}" in any argument value is replaced by the notice.
+export type Reach = { server: string; tool: string; args: Record<string, string>; says: string }
+
+// Taking care of runs, each switch on its own (Routine and Cruise act; Shadow
+// only reports what it would do).
+export type Care = {
+  // Add time to a running run before its budget runs out.
+  extendTimeouts: boolean
+  // Resume a run that ended failed or timed out with an open pull request,
+  // once (runs_continue with "resume the existing PR").
+  relaunch: boolean
+  // Stop a run that is stuck (silent past twice the silence limit, no open
+  // question), never one whose pull request merged; then resume it once.
+  stopStuck: boolean
+}
+
+export const DEFAULT_CARE: Care = { extendTimeouts: true, relaunch: true, stopStuck: true }
+
 export type Policy = {
   version: 1
   mode: Mode
@@ -33,6 +53,13 @@ export type Policy = {
   watchRepos: string[]
   // Cruise mode approves merges only when this is on.
   mergeBar: boolean
+  // The person's own merge bar, in their words ("at least two AI agents
+  // reviewed the PR"). The decision verifies it before approving a merge;
+  // the repository's required checks and open threads stay a floor.
+  mergeBarWords: string
+  // How notices reach the person besides the toast, the strip and desktop.
+  reach: Reach[]
+  care: Care
   // The model the decision call uses (an alias or id).
   model: string
   notifyDesktop: boolean
@@ -131,6 +158,21 @@ export function parseRule(v: Yaml, where: string, componentNames: ReadonlySet<st
   return rule
 }
 
+function parseReach(v: Yaml, where: string): Reach {
+  if (!isObj(v)) throw new Error(`${where} must be a mapping`)
+  const server = str(v.server, `${where}.server`)
+  const tool = str(v.tool, `${where}.tool`)
+  if (!/^[A-Za-z0-9_.-]{1,100}$/.test(server)) throw new Error(`${where}.server must be an MCP server name as /mcp lists it`)
+  if (!/^[A-Za-z0-9_.-]{1,100}$/.test(tool)) throw new Error(`${where}.tool must be the tool's name on that server`)
+  const raw = isObj(v.args) ? v.args : v.args == null ? {} : (() => {
+    throw new Error(`${where}.args must be a mapping`)
+  })()
+  const args: Record<string, string> = {}
+  for (const [k, x] of Object.entries(raw)) args[k] = str(x, `${where}.args.${k}`)
+  if (!Object.values(args).some(x => x.includes('{text}'))) throw new Error(`${where}.args must put {text} in one argument (where the notice goes)`)
+  return { server, tool, args, says: str(v.says, `${where}.says`) }
+}
+
 function parseComponent(v: Yaml, where: string): Component {
   if (!isObj(v)) throw new Error(`${where} must be a mapping`)
   const name = str(v.name, `${where}.name`)
@@ -165,6 +207,10 @@ export function validatePolicy(y: Yaml): Policy {
   const rules = rawRules.map((r, i) => parseRule(r, `rules[${i}]`, names))
   const ids = new Set(rules.map(r => r.id))
   if (ids.size !== rules.length) throw new Error('rules: two rules share an id')
+  const reach = (Array.isArray(y.reach) ? y.reach : y.reach == null ? [] : (() => {
+    throw new Error('reach must be a list')
+  })()).map((r, i) => parseReach(r, `reach[${i}]`))
+  const care = isObj(y.care) ? y.care : {}
   return {
     version: 1,
     mode: mode as Mode,
@@ -174,6 +220,13 @@ export function validatePolicy(y: Yaml): Policy {
     watchDeputies: strList(watch.deputies, 'watch.deputies'),
     watchRepos: strList(watch.repos, 'watch.repos'),
     mergeBar: bool(y.merge_bar, 'merge_bar', false),
+    mergeBarWords: str(y.merge_bar_words, 'merge_bar_words').slice(0, 1000),
+    reach,
+    care: {
+      extendTimeouts: bool(care.extend_timeouts, 'care.extend_timeouts', DEFAULT_CARE.extendTimeouts),
+      relaunch: bool(care.relaunch, 'care.relaunch', DEFAULT_CARE.relaunch),
+      stopStuck: bool(care.stop_stuck, 'care.stop_stuck', DEFAULT_CARE.stopStuck),
+    },
     model: str(y.model, 'model', DEFAULT_MODEL) || DEFAULT_MODEL,
     notifyDesktop: bool(notify.desktop, 'notify.desktop', true),
     rules,
@@ -210,6 +263,7 @@ export function policyYaml(p: Policy): string {
     servers: [...p.servers],
     merge_bar: p.mergeBar,
     model: p.model,
+    care: { extend_timeouts: p.care.extendTimeouts, relaunch: p.care.relaunch, stop_stuck: p.care.stopStuck },
     notify: { desktop: p.notifyDesktop },
     limits: {
       answers_per_cycle: p.limits.answersPerCycle,
@@ -218,6 +272,14 @@ export function policyYaml(p: Policy): string {
       silence_minutes: p.limits.silenceMinutes,
       journal_days: p.limits.journalDays,
     },
+  }
+  if (p.mergeBarWords) y.merge_bar_words = p.mergeBarWords
+  if (p.reach.length) {
+    y.reach = p.reach.map(r => {
+      const o: Obj = { server: r.server, tool: r.tool, args: { ...r.args } }
+      if (r.says) o.says = r.says
+      return o
+    })
   }
   if (p.watchDeputies.length || p.watchRepos.length) y.watch = { deputies: [...p.watchDeputies], repos: [...p.watchRepos] }
   y.components = p.components.map(c => {
@@ -262,8 +324,10 @@ export function policyWords(p: Policy): string[] {
   return [
     `Mode ${p.mode}. ${p.enabled ? (p.paused ? 'Paused.' : 'On.') : 'Off (stopped).'}`,
     `Watches ${list(p.servers)}${p.watchDeputies.length ? `, deputies ${list(p.watchDeputies)}` : ''}${p.watchRepos.length ? `, repositories ${list(p.watchRepos)}` : ''}.`,
-    `Merge bar ${p.mergeBar ? 'on: Cruise approves a merge only when required checks pass, reviews are given and no thread is open at the head' : 'off: merges always go to you'}.`,
+    `Merge bar ${p.mergeBar ? `on: Cruise approves a merge only when ${p.mergeBarWords ? `your bar holds ("${p.mergeBarWords}") and ` : ''}required checks pass, reviews are given and no thread is open at the head` : 'off: merges always go to you'}.`,
     `Desktop notifications ${p.notifyDesktop ? 'on' : 'off'} (toasts and the strip always).`,
+    p.reach.length ? `Also reaches you through ${list(p.reach.map(r => r.says || `${r.server} ${r.tool}`))}.` : 'Reaches you only in this session (no other channel set).',
+    `Takes care of runs: ${[p.care.extendTimeouts ? 'adds time before a run runs out' : '', p.care.relaunch ? 'resumes a run that failed with an open pull request, once' : '', p.care.stopStuck ? 'stops a stuck run (never one whose pull request merged) and resumes it once' : ''].filter(Boolean).join('; ') || 'off'}.`,
     `At most ${p.limits.answersPerCycle} answers per check; more than ${p.limits.notifyGroupOver} notices at once are grouped; questions under ${p.limits.expiryMinutes} minutes from expiry are escalated; a running run silent for ${p.limits.silenceMinutes} minutes is reported.`,
     ...p.components.map(c => `Component ${c.name}: ${c.repo ? `${c.repo} ` : ''}${c.paths.join(', ')}.`),
     ...p.rules.map(r => ruleWords(r, p.components)),
@@ -286,6 +350,9 @@ export function newPolicy(server: string): Policy {
     watchDeputies: [],
     watchRepos: [],
     mergeBar: false,
+    mergeBarWords: '',
+    reach: [],
+    care: { ...DEFAULT_CARE },
     model: DEFAULT_MODEL,
     notifyDesktop: true,
     rules: [],

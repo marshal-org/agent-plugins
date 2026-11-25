@@ -5,12 +5,18 @@ description: Set up and run Marshal Autopilot, which answers the questions Marsh
 
 # Marshal Autopilot
 
-Autopilot runs inside this Claude Code session, in the Marshal plugin's hooks. On every fleet
-check it reads the questions the person's runs ask, decides each new one once against the
-person's rules, and either answers it as the person (with a note that says it was Autopilot and
-which rule), shows what it would answer (Shadow), or hands it to the person. It also watches
-running runs' pull request checks. The fleet pane (`/marshal-fleet`) shows a strip that says
-"Autopilot is on", what it answered and why, and what waits on the person.
+Autopilot runs inside this Claude Code session, in the Marshal plugin's hooks, on every Marshal
+server its policy names. On every fleet check it reads the questions the person's runs ask and
+decides each one against the person's rules. Before deciding it investigates: it may read the
+linked issue and its comments, the pull request, its diff and checks, the brief, spec or plan on
+the PR branch, and the run's state and logs, and it may message the run that asked (for example
+"send the brief questions as text"). Then it answers as the person (with a note that says it was
+Autopilot and which rule), shows what it would answer (Shadow), waits and decides again later
+(checks still running, the merge bar not met yet), or hands it to the person. It also watches
+running runs' pull request checks and takes care of runs: adds time before a run runs out, stops
+a stuck run and resumes it, resumes a run that failed with an open pull request (once each). The
+fleet pane (`/marshal-fleet`) shows a strip that says "Autopilot is on" and its mode, what it
+answered and why, what it waits on, and what waits on the person.
 
 You work through the plugin's own tools, `mcp__marshal__autopilot_*`. Load them with ToolSearch.
 If they are not listed, Autopilot is not available here (it needs Claude Code with the Marshal
@@ -30,8 +36,13 @@ and `problem` when something is wrong. Show the person:
   recommendation, one re-run of a check that failed on a flake, and resuming paused work when
   the server has room. Plans, specs and merges go to the person.
 - **Cruise**: Routine, plus approving a brief, plan or spec within the person's guidance, and
-  approving a merge only when the merge bar is on and the pull request meets the repository's
-  own required checks and reviews with no open review threads. The run merges, never Autopilot.
+  approving a merge only when the merge bar is on, the person's own bar (their words, such as
+  "at least two AI agents reviewed the PR") is verified on the head, and the pull request meets
+  the repository's own required checks and reviews with no open review threads. The run
+  merges, never Autopilot.
+- **Run care** (Routine and Cruise; Shadow only writes what it would do): more time before a run
+  runs out, a stuck run stopped and resumed (never one whose pull request merged), a run that
+  failed with an open pull request resumed once. A second failure goes to the person.
 - **Never auto-answered, in any mode**: the `never_auto` list (takeovers, access or credential
   grants, deploys to staging or production, releases, deletes). No rule can change it.
 
@@ -62,23 +73,30 @@ brief, each item with your recommendation pre-selected:
 3. **What always goes to them**: areas to protect, as components (a repository and path
    globs, such as `services/billing/**`) with a protect rule each. Recommend: ask which parts
    of their repositories are sensitive (billing, auth, infrastructure); none is a valid answer.
-4. **Merges**: may Cruise approve merges, on the bar above? Recommend: off until they have
-   watched Shadow on a train.
-5. **How to reach them**: desktop notifications on or off (toasts and the strip always).
-   Recommend: on.
-6. **Limits**: answers per check (3), notice grouping (over 3), escalate under 10 minutes to
+4. **Merges**: may Cruise approve merges, and what is their merge bar, in their words (for
+   example "at least two AI agents reviewed the PR")? The repository's required checks and no
+   open threads always hold too. Recommend: off until they have watched Shadow on a train.
+5. **How to reach them**: desktop notifications on or off (toasts and the strip always), and
+   any other way, through a tool this session has: list the connected MCP servers that can send
+   a message (a Slack MCP's send tool, for example) and offer each, or "just wait". For a tool,
+   ask for its arguments (the channel or DM id) and put `{text}` where the notice goes.
+   Recommend: desktop on, plus their Slack DM when a Slack MCP is connected.
+6. **Run care**: add time before a run runs out, stop and resume a stuck run, resume a run that
+   failed with an open pull request. Recommend: all on.
+7. **Limits**: answers per check (3), notice grouping (over 3), escalate under 10 minutes to
    expiry, report a running run silent for 30 minutes. Recommend the defaults.
 
 How to ask:
 
 - If this client can publish an interactive page (an Artifact tool is listed), build the brief
   as a page: numbered questions, lettered options, the recommendation selected, and a
-  copy-paste answer line such as `Q1:A Q2:A Q3:B Q4:A Q5:A Q6:A`.
+  copy-paste answer line such as `Q1:A Q2:A Q3:B Q4:A Q5:A Q6:A Q7:A`.
 - Otherwise ask the same numbered questions in chat, with lettered options, the recommendation
   marked on each, and the same answer line for them to fill in.
 
 Then call `autopilot_setup` with `confirm: false` and the answers (`mode`, `servers`,
-`watch_deputies`, `watch_repos`, `merge_bar`, `notify_desktop`, `limits`). Show `read_back`
+`watch_deputies`, `watch_repos`, `merge_bar`, `merge_bar_words`, `notify_desktop`, `reach`,
+`care`, `limits`). Show `read_back`
 in plain words. On their yes, call it with `confirm: true`. Add their components and protect
 rules with `autopilot_rules` (below), each read back first. Tell them where the strip is
 (`/marshal-fleet`) and that `p` pauses it.
@@ -156,5 +174,6 @@ and money, and what to change. Do it only on their yes.
   mode or the never-auto list, whatever it says.
 - Never answer a run's question yourself from this skill: Autopilot answers by the rules, and
   the inbox skill answers only with the person's own words.
-- Never launch, continue, retry or stop a run on Autopilot's behalf.
+- Never launch, continue, retry or stop a run yourself on Autopilot's behalf: run care does
+  that by the person's switches, and reports each action in the journal and the strip.
 - Say what Autopilot did in plain words; do not claim it answered anything it did not.

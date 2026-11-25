@@ -110,6 +110,8 @@ const LOOK: Record<string, { glyph: string; color?: string; words: string }> = {
   refused: { glyph: '✕', color: 'error', words: 'refused' },
   answered_elsewhere: { glyph: '–', words: 'answered by you' },
   nudged: { glyph: '↪', color: 'suggestion', words: 'told the run' },
+  waiting: { glyph: '◌', color: 'suggestion', words: 'waiting' },
+  cared: { glyph: '↻', color: 'suggestion', words: 'took care' },
 }
 
 function row(kit: Kit, $: EngineInterface, e: AutopilotEntry, isSelected: boolean) {

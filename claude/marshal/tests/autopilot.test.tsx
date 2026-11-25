@@ -760,12 +760,12 @@ test('US2: stop turns Autopilot off; turning it on again keeps the mode it had',
   expect((await tool($, 'autopilot_control', { action: 'resume' })).state).toBe('on')
 })
 
-function mergeWorld(on: On, opts: { bar?: boolean; mode?: string; threads?: readonly boolean[]; morePages?: boolean; checks?: readonly { name: string; bucket: string }[]; review?: string; ghDown?: boolean }) {
+function mergeWorld(on: On, opts: { bar?: boolean; mode?: string; threads?: readonly boolean[]; morePages?: boolean; checks?: readonly { name: string; bucket: string }[]; review?: string; ghDown?: boolean; extra?: string; model?: WorldOpts['model'] }) {
   const merge = ROUTINE_ASKS[5]!
   return world(on, {
     asks: [merge],
-    files: { [POLICY]: policyYaml({ mode: opts.mode ?? 'cruise', mergeBar: opts.bar ?? true }) },
-    model: byKind([merge]),
+    files: { [POLICY]: policyYaml({ mode: opts.mode ?? 'cruise', mergeBar: opts.bar ?? true, extra: opts.extra }) },
+    model: opts.model ?? byKind([merge]),
     mcp: c => (c.tool === 'runs_prs' && c.args.run_id === merge.run_id ? text(prEvents('acme/app', 12)) : undefined),
     gh: argv => {
       if (opts.ghDown) return { exitCode: 1, stderr: 'gh: not logged in' }
@@ -792,12 +792,8 @@ test('US2: Cruise approves a merge only when checks, reviews and threads hold at
 })
 
 for (const [name, opts, why] of [
-  ['an unresolved thread', { threads: [true, false] }, /1 review thread is unresolved/],
   // All threads on the first page resolved, but more pages exist.
   ['review threads past the first page', { morePages: true }, /more review threads than one read shows \(101\)/],
-  ['a failing required check', { checks: [{ name: 'ci', bucket: 'fail' }] }, /required checks not passing \(ci: fail\)/],
-  ['a missing review', { review: 'REVIEW_REQUIRED' }, /required reviews are not given/],
-  ['gh that cannot read', { ghDown: true }, /could not read acme\/app#12/],
   ['the merge bar off', { bar: false }, /the merge bar is off/],
   // Routine has no merge rule at all: the model naming one is not obeyed.
   ['Routine mode', { mode: 'routine' }, /"preset\.approve-merge" does not exist/],
@@ -808,6 +804,25 @@ for (const [name, opts, why] of [
     expect(w.answers()).toHaveLength(0)
     expect(String(w.journal()[0]!.reason)).toMatch(why)
     expect(w.notified).toHaveLength(1)
+    neverActs(w)
+  })
+}
+
+// #3016 Q5: a bar that can still be met is waited on, not handed over: no
+// answer, no notice, decided again later.
+for (const [name, opts, why] of [
+  ['an unresolved thread', { threads: [true, false] }, /1 review thread is unresolved/],
+  ['a failing required check', { checks: [{ name: 'ci', bucket: 'fail' }] }, /required checks not passing \(ci: fail\)/],
+  ['a missing review', { review: 'REVIEW_REQUIRED' }, /required reviews are not given/],
+  ['gh that cannot read', { ghDown: true }, /could not read acme\/app#12/],
+] as const) {
+  test(`#3016: Cruise waits on a merge with ${name}, and tells no one yet`, async ($, on) => {
+    const w = mergeWorld(on, opts)
+    await start($, w)
+    expect(w.answers()).toHaveLength(0)
+    expect(w.journal()[0]!.outcome).toBe('waiting')
+    expect(String(w.journal()[0]!.reason)).toMatch(why)
+    expect(w.notified).toHaveLength(0)
     neverActs(w)
   })
 }
@@ -1354,3 +1369,221 @@ for (const via of ['inbox_get', 'runs_attention'] as const) {
     expect(w.journal()[0]).toMatchObject({ outcome: 'answered', answer: 'Proceed  now' })
   })
 }
+
+// ── #3016: Autopilot replaces orchestrate ────────────────────────────────────
+
+const PLAN = ROUTINE_ASKS[4]!
+const reply = (v: Record<string, unknown>) => JSON.stringify(v)
+const withBar = (d: string, met: boolean) => JSON.stringify({ ...(JSON.parse(d) as Record<string, unknown>), merge_bar_met: met })
+
+test('#3016 Q1: the decision reads the linked issue first, as data, then decides', async ($, on) => {
+  const w = world(on, {
+    asks: [PLAN],
+    files: { [POLICY]: policyYaml({ mode: 'cruise' }) },
+    model: prompt =>
+      prompt.includes('READS SO FAR')
+        ? decision({ gate: 'approve_plan', rule_id: 'preset.approve-plan' })
+        : reply({ read: { tool: 'issue', args: { repo: 'acme/app', number: 7 } } }),
+    gh: argv => (argv.join(' ') === 'gh issue view 7 --repo acme/app --comments' ? { stdout: 'Operator comment: approve the split into two PRs.' } : undefined),
+  })
+  await start($, w)
+  expect(w.answers().map(c => c.args.answer)).toEqual(['Approve'])
+  expect(w.prompts).toHaveLength(2)
+  // The read comes back as untrusted data, in its own block.
+  expect(w.prompts[1]!.prompt).toContain('<untrusted-content source="read 1 issue">\nOperator comment: approve the split into two PRs.')
+  // The system prompt tells the model it may read.
+  expect(w.prompts[0]!.system).toContain('INVESTIGATE FIRST')
+})
+
+test('#3016 Q1: a read Autopilot does not have is refused, and nothing runs', async ($, on) => {
+  const w = world(on, {
+    asks: [PLAN],
+    files: { [POLICY]: policyYaml({ mode: 'cruise' }) },
+    model: prompt => (prompt.includes('READS SO FAR') ? decision({ gate: 'approve_plan' }) : reply({ read: { tool: 'shell', args: { cmd: 'rm -rf /' } } })),
+  })
+  await start($, w)
+  expect(w.prompts[1]!.prompt).toContain('(refused: "shell" is not a read Autopilot has)')
+  expect(w.runs.filter(r => r.argv[0] !== 'sh' && r.argv[0] !== 'gh')).toEqual([])
+  expect(w.answers()).toHaveLength(0)
+})
+
+test('#3016 Q1+Q5: the decision messages the run that asked, waits silently, and decides again later', async ($, on) => {
+  let second = false
+  const w = world(on, {
+    asks: [PLAN],
+    files: { [POLICY]: policyYaml({ mode: 'cruise' }) },
+    model: prompt => {
+      if (second) return decision({ gate: 'approve_plan', rule_id: 'preset.approve-plan' })
+      if (!prompt.includes('READS SO FAR')) return reply({ read: { tool: 'message_run', args: { text: 'Send the brief questions as text in your ask.' } } })
+      second = true
+      return reply({ gate: 'approve_plan', outcome: 'wait', reasoning: 'Asked the run for the brief text.' })
+    },
+  })
+  await start($, w)
+  const sent = w.calls.filter(c => c.tool === 'runs_message')
+  expect(sent.map(c => c.args.run_id)).toEqual([PLAN.run_id])
+  expect(String(sent[0]!.args.text)).toBe('Marshal Autopilot: Send the brief questions as text in your ask.')
+  expect(w.journal().at(-1)).toMatchObject({ ask_id: PLAN.ask_id, outcome: 'waiting' })
+  expect(w.notified).toHaveLength(0)
+  expect(w.answers()).toHaveLength(0)
+  await w.clock.advance(5 * 60_000 + 25_000)
+  expect(w.answers().map(c => c.args.answer)).toEqual(['Approve'])
+})
+
+test('#3016 Q5: a question still waiting near its expiry goes to the person, once', async ($, on) => {
+  const w = world(on, {
+    asks: [expiring(PLAN, 30)],
+    files: { [POLICY]: policyYaml({ mode: 'cruise' }) },
+    model: () => reply({ gate: 'approve_plan', outcome: 'wait', reasoning: 'Checks still running.' }),
+  })
+  await start($, w)
+  expect(w.notified).toHaveLength(0)
+  await w.clock.advance(22 * 60_000)
+  expect(w.notified.filter(n => /still waiting/.test(n))).toHaveLength(1)
+  expect(w.journal().at(-1)).toMatchObject({ outcome: 'escalated' })
+  await w.clock.advance(5 * 60_000)
+  expect(w.notified.filter(n => /still waiting/.test(n))).toHaveLength(1)
+})
+
+test('#3016 Q2: with the person\'s own merge bar, a merge waits until the decision says it verified it', async ($, on) => {
+  const merge = ROUTINE_ASKS[5]!
+  const extra = 'merge_bar_words: at least two AI agents reviewed the PR'
+  const unmet = mergeWorld(on, { extra, model: () => withBar(decision({ gate: 'approve_merge', rule_id: 'preset.approve-merge' }), false) })
+  await start($, unmet)
+  expect(unmet.answers()).toHaveLength(0)
+  expect(unmet.journal()[0]).toMatchObject({ ask_id: merge.ask_id, outcome: 'waiting', reason: 'your merge bar is not met yet' })
+  expect(unmet.prompts[0]!.prompt).toContain("THE PERSON'S MERGE BAR (their words): at least two AI agents reviewed the PR")
+})
+
+test('#3016 Q2: a verified merge bar, and the repository floor held, approves; the run merges', async ($, on) => {
+  const w = mergeWorld(on, { extra: 'merge_bar_words: at least two AI agents reviewed the PR', model: () => withBar(decision({ gate: 'approve_merge', rule_id: 'preset.approve-merge' }), true) })
+  await start($, w)
+  expect(w.answers().map(c => c.args.answer)).toEqual(['Merge'])
+  neverActs(w)
+})
+
+function careWorld(on: On, opts: { mode?: string; runs: unknown[]; ended?: unknown[]; prs?: Record<string, unknown>; extra?: string }) {
+  return world(on, {
+    files: { [POLICY]: policyYaml({ mode: opts.mode ?? 'cruise', extra: opts.extra }) },
+    runs: opts.runs,
+    tools: toolsFor(SERVER, ['runs_timeout', 'runs_continue', 'runs_continuation', 'runs_stop']),
+    mcp: c => {
+      // Runs that ended badly reach the board through runs_attention.
+      if (c.tool === 'runs_attention' && opts.ended) return text({ since: '2026-11-16T09:00:00Z', asks: [], runs: opts.ended })
+      if (c.tool === 'runs_prs') return text(opts.prs?.[String(c.args.run_id)] ?? { events: [] })
+      if (c.tool === 'runs_timeout' || c.tool === 'runs_continue' || c.tool === 'runs_stop') return text({ ok: true })
+      return undefined
+    },
+  })
+}
+
+const running = (id: string, extra: Record<string, unknown> = {}) => ({ id, state: 'running', title: `#9 ${id}`, deputy: 'shipper', created_at: '2026-11-16T09:00:00Z', ...extra })
+
+test('#3016 Q4: a running run gets more time before it runs out, every 90 minutes at most', async ($, on) => {
+  const w = careWorld(on, { runs: [running('run-x')] })
+  await start($, w)
+  expect(w.calls.filter(c => c.tool === 'runs_timeout').map(c => c.args)).toEqual([{ run_id: 'run-x', action: 'add', add_secs: 7200 }])
+  await w.clock.advance(60_000)
+  expect(w.calls.filter(c => c.tool === 'runs_timeout')).toHaveLength(1)
+})
+
+test('#3016 Q4: Shadow only writes what care would do', async ($, on) => {
+  const w = careWorld(on, { mode: 'shadow', runs: [running('run-x')] })
+  await start($, w)
+  expect(w.calls.filter(c => c.tool === 'runs_timeout')).toHaveLength(0)
+  expect(w.journal().some(e => /Shadow: would add 2 hours/.test(String(e.reason)))).toBe(true)
+})
+
+test('#3016 Q4: a run that failed with an open PR is resumed once; a second failure goes to the person', async ($, on) => {
+  const failed = { id: 'run-f', state: 'failed', title: '#8 work', deputy: 'shipper', stop_reason: 'harness_lost', created_at: '2026-11-16T09:00:00Z', completed_at: new Date(NOW - 10 * 60_000).toISOString() }
+  const w = careWorld(on, { runs: [], ended: [failed], prs: { 'run-f': prEvents('acme/app', 8) }, extra: 'care:\n  extend_timeouts: false' })
+  await start($, w)
+  const cont = w.calls.filter(c => c.tool === 'runs_continue')
+  expect(cont).toHaveLength(1)
+  expect(cont[0]!.args.run_id).toBe('run-f')
+  expect(String(cont[0]!.args.task)).toContain('RESUME the existing pull request acme/app#8; do not start over')
+  await w.clock.advance(60_000)
+  expect(w.calls.filter(c => c.tool === 'runs_continue')).toHaveLength(1)
+  // It fails again, after the resume.
+  failed.completed_at = new Date(NOW + 30 * 60_000).toISOString()
+  await w.clock.advance(31 * 60_000)
+  expect(w.calls.filter(c => c.tool === 'runs_continue')).toHaveLength(1)
+  expect(w.notified.some(n => /again after Autopilot resumed it/.test(n))).toBe(true)
+})
+
+test('#3016 Q4: a stuck run is stopped and resumed; one whose PR merged is never stopped', async ($, on) => {
+  const merged = { events: [{ action: 'merged', repo: 'acme/app', number: 5, url: 'https://github.com/acme/app/pull/5', outcome: { state: 'merged' } }] }
+  const w = careWorld(on, { runs: [running('run-s'), running('run-m')], prs: { 'run-s': prEvents('acme/app', 4), 'run-m': merged }, extra: 'care:\n  extend_timeouts: false' })
+  await start($, w)
+  await w.clock.advance(61 * 60_000)
+  expect(w.calls.filter(c => c.tool === 'runs_stop').map(c => c.args.run_id)).toEqual(['run-s'])
+  expect(w.calls.filter(c => c.tool === 'runs_continue').map(c => c.args.run_id)).toEqual(['run-s'])
+  expect(w.journal().some(e => e.run_id === 'run-m' && /merged: not stopped/.test(String(e.reason)))).toBe(true)
+})
+
+test('#3016 Q6: a notice also reaches the person through the channel they named', async ($, on) => {
+  const odd = ROUTINE_ASKS[0]!
+  const reach = ['reach:', '  - server: slack', '    tool: send_message', '    says: my Slack DM', '    args:', '      channel: D123', '      text: "{text}"'].join('\n')
+  const w = world(on, {
+    asks: [odd],
+    files: { [POLICY]: policyYaml({ mode: 'cruise', extra: reach }) },
+    model: () => decision({ gate: 'other' }),
+  })
+  await start($, w)
+  const sent = w.calls.filter(c => c.server === 'slack' && c.tool === 'send_message')
+  expect(sent).toHaveLength(1)
+  expect(sent[0]!.args.channel).toBe('D123')
+  expect(String(sent[0]!.args.text)).toMatch(/shipper asks: .*no rule covers it/)
+})
+
+test('#3016: the merge bar words, reach and care survive a rule change', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await tool($, 'autopilot_setup', {
+    confirm: true,
+    mode: 'cruise',
+    merge_bar: true,
+    merge_bar_words: 'two AI reviews',
+    reach: [{ server: 'slack', tool: 'send_message', args: { channel: 'D1', text: '{text}' }, says: 'Slack' }],
+    care: { stop_stuck: false },
+  })
+  await tool($, 'autopilot_rules', { op: 'add', confirm: true, rule: { id: 'docs-ok', action: 'answer', kinds: ['proceed'], guidance: 'go' } })
+  const f = w.files.get(POLICY)!.text
+  expect(f).toContain('merge_bar_words: two AI reviews')
+  expect(f).toContain('server: slack')
+  expect(f).toContain('stop_stuck: false')
+  const read = (await tool($, 'autopilot_status')).policy as string[]
+  expect(read.join('\n')).toMatch(/your bar holds \("two AI reviews"\)/)
+  expect(read.join('\n')).toMatch(/Also reaches you through Slack/)
+})
+
+test('#3016 Q7: every server in the policy is read and watched, not only the pane\'s', async ($, on) => {
+  const other: AskFixture = { ...PROCEED, ask_id: 'proceed-2', run_id: 'run-proceed-2' }
+  const w = world(on, {
+    asks: [PROCEED],
+    files: { [POLICY]: policyYaml({ mode: 'routine', servers: [SERVER, 'marshal-two'] }) },
+    tools: [...toolsFor(SERVER), ...toolsFor('marshal-two')],
+    model: byKind([PROCEED, other]),
+    mcp: c => {
+      if (c.server !== 'marshal-two') return undefined
+      if (c.tool === 'runs_attention') return text(attention([other]))
+      if (c.tool === 'runs_list') return text(runsFor([other]))
+      if (c.tool === 'inbox_get') return text(inboxGet(other))
+      return undefined
+    },
+  })
+  await start($, w)
+  await w.clock.advance(25_000)
+  // Each ask is answered on the server it came from.
+  expect(w.answers().map(c => `${c.server} ${String(c.args.ask_id)}`).sort()).toEqual([`${SERVER} proceed`, 'marshal-two proceed-2'])
+})
+
+test('#3016 Q7: a policy server that connects later is picked up on the next poll', async ($, on) => {
+  const tools = [...toolsFor(SERVER)]
+  const w = world(on, { files: { [POLICY]: policyYaml({ mode: 'routine', servers: [SERVER, 'marshal-two'] }) }, tools })
+  await start($, w)
+  expect(w.calls.some(c => c.server === 'marshal-two')).toBe(false)
+  tools.push(...toolsFor('marshal-two'))
+  await w.clock.advance(25_000)
+  expect(w.calls.some(c => c.server === 'marshal-two' && c.tool === 'runs_attention')).toBe(true)
+})
