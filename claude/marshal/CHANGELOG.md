@@ -3,6 +3,12 @@
 Each release of the `marshal` plugin, newest first. The release on GitHub
 (`marshal-v<version>`) shows the section for its version.
 
+## 0.7.4
+
+- A session on a newer plugin takes Autopilot over from one still running an older plugin,
+  instead of standing by behind it ("runs in another Claude Code session, another one") until
+  that session is closed or reloaded.
+
 ## 0.7.3
 
 - When another Claude Code session runs Autopilot, the strip names it ("runs in another Claude

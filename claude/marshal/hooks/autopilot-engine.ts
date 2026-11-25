@@ -20,6 +20,7 @@ import {
 import { presetRules, type Rule } from './autopilot-presets'
 import { toolSpelling } from './config'
 import { choicesOf, cut, firstLine, plainText, resultJson } from './fleet-model'
+import { isNewer, readCurrent, versions } from './version'
 
 // Autopilot rides the fleet poll: after each poll wrote the board, it diffs
 // the asks against its journal and wakes the model only for an ask it has
@@ -104,7 +105,18 @@ async function whoAmI($: EngineInterface): Promise<Owner> {
   return owner
 }
 
-type Lock = { id: string; at: number; pid: string; name: string; cwd: string }
+// version: the plugin version of the session that wrote it ('' from plugins
+// before 0.7.4, which did not record it).
+type Lock = { id: string; at: number; pid: string; name: string; cwd: string; version: string }
+
+// A newer plugin takes Autopilot over from a session still running an older
+// one (it has not run /plugin and /reload-plugins), instead of standing by
+// behind it until that session closes. Older plugins stand by behind any
+// fresh lock that is not theirs, so the older session steps aside.
+export function outranks(mine: string, holder: string): boolean {
+  if (!mine) return false
+  return holder === '' || isNewer(holder, mine)
+}
 
 // Who leads, in words for the strip: "release-train (~/repos/atlas)".
 export function leaderWords(l: Pick<Lock, 'pid' | 'name' | 'cwd'>, home = ''): string {
@@ -124,25 +136,29 @@ export async function leads($: EngineInterface, now: number): Promise<boolean> {
     return true
   }
   const me = await whoAmI($)
+  // The version decides takeovers and goes into the lock: read it here if
+  // the plugin's startup has not yet.
+  if (!versions.current) await readCurrent($)
   const read = async (): Promise<Lock> => {
     try {
       const v = JSON.parse((await readText($, path)) ?? '') as Record<string, unknown>
       const s = (k: string) => (typeof v[k] === 'string' ? (v[k] as string) : '')
-      return { id: s('id'), at: typeof v.at === 'number' ? v.at : 0, pid: s('pid'), name: s('name'), cwd: s('cwd') }
+      return { id: s('id'), at: typeof v.at === 'number' ? v.at : 0, pid: s('pid'), name: s('name'), cwd: s('cwd'), version: s('version') }
     } catch {
-      return { id: '', at: 0, pid: '', name: '', cwd: '' }
+      return { id: '', at: 0, pid: '', name: '', cwd: '', version: '' }
     }
   }
   const cur = await read()
   // Another session holds a fresh lock. The same Claude Code process after a
-  // reload (same pid, new load id) takes it back at once.
+  // reload (same pid, new load id) takes it back at once, and so does a
+  // session whose plugin is newer than the holder's.
   const mine = cur.id === ap.sessionId || (me.pid !== '' && cur.pid === me.pid)
-  if (cur.id && !mine && now - cur.at < LEAD_STALE_MS) {
+  if (cur.id && !mine && now - cur.at < LEAD_STALE_MS && !outranks(versions.current, cur.version)) {
     ap.leader = cur
     return false
   }
   try {
-    await writePrivate($, path, JSON.stringify({ id: ap.sessionId, at: now, pid: me.pid, name: me.name, cwd: me.cwd }))
+    await writePrivate($, path, JSON.stringify({ id: ap.sessionId, at: now, pid: me.pid, name: me.name, cwd: me.cwd, version: versions.current }))
   } catch {
     // Cannot write the lock (no shell): act alone, as before.
     return true

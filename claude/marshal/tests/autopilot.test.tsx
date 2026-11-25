@@ -71,6 +71,8 @@ export type WorldOpts = {
   sh?: (op: string) => 'fail' | 'nostart' | undefined
   // CLAUDE_PID as this Claude Code process sees it (the leader lock).
   pid?: string
+  // This plugin's .claude-plugin/plugin.json (its version).
+  pluginJson?: string
 }
 
 export type World = ReturnType<typeof world>
@@ -124,6 +126,7 @@ export function world(on: On, opts: WorldOpts = {}) {
   })
   on('fs.exists', (_, e) => ({ value: files.has(e.path) || isDir(e.path) }))
   on('fs.read', (_, e) => {
+    if (opts.pluginJson !== undefined && e.path.endsWith('/.claude-plugin/plugin.json')) return { value: opts.pluginJson }
     const f = files.get(e.path)
     return f ? { value: f.text } : { deny: 'ENOENT' }
   })
@@ -1713,4 +1716,27 @@ test('standing by, the strip names the session that leads; the same process afte
   await w.clock.advance(25_000)
   expect(w.answers().map(c => c.args.ask_id)).toEqual(['proceed'])
   expect(JSON.parse(w.files.get(lock)!.text).pid).toBe('4242')
+})
+
+test('a newer plugin takes Autopilot over from a session still on an older one', async ($, on) => {
+  const lock = `${DATA}/leader.json`
+  // Written by a plugin before 0.7.4: no version, no pid.
+  const old = { id: 'old-plugin-load', at: NOW }
+  {
+    const w = world(on, {
+      asks: [PROCEED],
+      pid: '4242',
+      pluginJson: '{"name":"marshal","version":"0.7.4"}',
+      files: { [POLICY]: policyYaml({ mode: 'routine' }), [lock]: JSON.stringify(old) },
+      model: byKind([PROCEED]),
+    })
+    await start($, w)
+    expect(w.answers().map(c => c.args.ask_id)).toEqual(['proceed'])
+    expect(JSON.parse(w.files.get(lock)!.text)).toMatchObject({ pid: '4242', version: '0.7.4' })
+
+    // A session on a newer plugin holds the lock: this one stands by.
+    w.files.set(lock, { text: JSON.stringify({ id: 'newer', at: w.clock.now(), pid: '9', name: 'next', cwd: '', version: '0.8.0' }), mtime: NOW, mode: '0600' })
+    await w.clock.advance(25_000)
+    expect(JSON.parse(w.files.get(lock)!.text).id).toBe('newer')
+  }
 })

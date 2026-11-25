@@ -2,7 +2,7 @@
 // its plain-words read-back, the decision guard, the journal entry cap. No
 // engine calls.
 
-import { leaderWords, mib, nextClass } from '../hooks/autopilot-engine'
+import { leaderWords, outranks, mib, nextClass } from '../hooks/autopilot-engine'
 import { expect, test } from 'claude-code/testing'
 
 import { askBlock, decisionsBlock, guard, mentionProtect, parseModelJson, untrusted, type AskInput } from '../hooks/autopilot-decide'
@@ -330,4 +330,12 @@ test('the first complete JSON object is read, whatever follows it', () => {
   expect(parseModelJson('{"reasoning":"a } and a { inside","gate":"other"}')).toEqual({ reasoning: 'a } and a { inside', gate: 'other' })
   expect(parseModelJson('```json\n{"gate":"proceed"}\n```')).toEqual({ gate: 'proceed' })
   expect(parseModelJson('no json here')).toBeUndefined()
+})
+
+test('which plugin version may take the lock over', () => {
+  expect(outranks('0.7.4', '')).toBe(true) // a lock from before versions were recorded
+  expect(outranks('0.7.4', '0.7.3')).toBe(true)
+  expect(outranks('0.7.4', '0.7.4')).toBe(false)
+  expect(outranks('0.7.4', '0.8.0')).toBe(false)
+  expect(outranks('', '')).toBe(false) // own version unknown: never take over
 })
