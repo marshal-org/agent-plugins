@@ -1,6 +1,7 @@
 // Pure logic of the fleet mod: reading Marshal MCP results into the board,
 // and telling what changed between two polls. No engine calls here.
 
+import { updateLabel, versionLabel, type Versions } from './version'
 import type { Fleet, FleetAsk, FleetCell, FleetPr, FleetQueued, FleetRun } from '../types'
 
 export const ACTIVE_STATES = ['pending', 'running', 'awaiting_human', 'engaged']
@@ -212,7 +213,7 @@ export function totals(fleet: Fleet): Totals {
 }
 
 // The status line under the prompt.
-export function statusLine(fleet: Fleet): string | undefined {
+export function statusLine(fleet: Fleet, v?: Versions, autopilot?: { state: string; mode: string }): string | undefined {
   if (fleet.cells.length === 0) return undefined
   const t = totals(fleet)
   // The engine names the plugin before the text ("marshal: ..."), so the
@@ -223,6 +224,17 @@ export function statusLine(fleet: Fleet): string | undefined {
   if (t.queued > 0) parts.push(`◌ ${t.queued} queued`)
   if (t.attention > 0) parts.push(`✕ ${t.attention} failed or parked`)
   if (t.errors > 0) parts.push(`${t.errors} cell${t.errors > 1 ? 's' : ''} unreachable`)
+  // Autopilot's mode while it is on or paused (off says nothing here).
+  if (autopilot?.mode && autopilot.state !== 'off') {
+    const m = autopilot.mode[0]!.toUpperCase() + autopilot.mode.slice(1)
+    parts.push(autopilot.state === 'paused' ? `Autopilot ${m} (paused)` : `Autopilot ${m}`)
+  }
+  // Which plugin runs, last, and a newer one when one is out.
+  const label = v ? versionLabel(v) : ''
+  if (v && label) {
+    const update = updateLabel(v)
+    parts.push(update ? `plugin ${label} (${update})` : `plugin ${label}`)
+  }
   return parts.join(' · ')
 }
 

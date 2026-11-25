@@ -355,7 +355,7 @@ test('US1: a restarted session never decides a journaled ask again', async ($, o
   expect(w.prompts).toHaveLength(0)
 })
 
-test('US1: the strip says "Autopilot is on" with a moving indicator, never the mode', async ($, on) => {
+test('US1: the strip says "Autopilot is on" with a moving indicator and its mode', async ($, on) => {
   const w = world(on, { asks: [PROCEED], files: { [POLICY]: policyYaml({ mode: 'routine' }) }, model: byKind([PROCEED]) })
   await start($, w)
   for (const surface of ['terminal', 'desktop'] as const) {
@@ -366,8 +366,8 @@ test('US1: the strip says "Autopilot is on" with a moving indicator, never the m
     await ui.advance(500)
     const after = JSON.stringify(await ui.drawn({ in: 'ap:indicator' }))
     expect(after).not.toBe(before)
-    // No mode name anywhere in the strip.
-    expect(await ui.find({ type: 'Text', text: /\b(shadow|routine|cruise)\b/i })).toBeUndefined()
+    // The strip names the mode next to "Autopilot is on".
+    expect(await ui.find({ type: 'Text', text: /· (Shadow|Routine|Cruise)/ })).toBeDefined()
     await ui.unmount()
   }
 })

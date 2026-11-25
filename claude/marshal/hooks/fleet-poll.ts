@@ -3,10 +3,12 @@ import type { EngineInterface } from 'claude-code'
 
 import type { Answering, Fleet, FleetCell, FleetPr, FleetRun } from '../types'
 import { EMPTY_FLEET } from './atoms'
-import { ap, autopilotCycle } from './autopilot-engine'
+import { ap, autopilotCycle, EMPTY_AUTOPILOT } from './autopilot-engine'
+import { versions } from './version'
 import { buildCell, changes, cut, errorCell, prsFrom, resultJson, savedAnswerPath, statusLine, toRun } from './fleet-model'
 
 const fleetAtom = atom({ plugin: 'marshal', key: 'fleet' } as const, EMPTY_FLEET, { shape: 'fleet-1' })
+const autopilotAtom = atom({ plugin: 'marshal', key: 'autopilot' } as const, EMPTY_AUTOPILOT, { shape: 'autopilot-1' })
 const answeringAtom = atom({ plugin: 'marshal', key: 'answering' } as const, null as Answering)
 
 // Call a Marshal tool and parse its JSON answer. An answer over Claude Code's
@@ -67,7 +69,7 @@ export async function clearRun($: EngineInterface, server: string, runId: string
     ...f,
     cells: f.cells.map(c => (c.server === server ? { ...c, attention: c.attention.filter(r => r.id !== runId) } : c)),
   }))
-  $.ui.status(statusLine(await read($, fleetAtom)))
+  $.ui.status(statusLine(await read($, fleetAtom), versions, await read($, autopilotAtom)))
 }
 
 // The title of an asking run that is not among the newest runs, read once.
@@ -156,7 +158,7 @@ export async function pollFleet($: EngineInterface, cells: readonly Cell[], noti
   const fresh = await Promise.all(cells.map(c => readCell($, c)))
   const next: Fleet = { cells: fresh, polledAt: await $.clock.now() }
   await update($, fleetAtom, () => next)
-  $.ui.status(statusLine(next))
+  $.ui.status(statusLine(next, versions, await read($, autopilotAtom)))
   // Autopilot decides the new asks before they are announced: the ones it
   // answers or would answer are not announced, the ones it hands to the
   // person it announces itself.

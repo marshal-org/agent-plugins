@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { marshalServers, pickServer, readConfig } from '../hooks/config'
+import { isNewer, updateLabel } from '../hooks/version'
 import { buildCell, changes, plainText, prLabel, prsFrom, resultJson, savedAnswerPath, serverUrl, statusLine, webBase } from '../hooks/fleet-model'
 import { formatAudit, formatCost, formatPorts, formatRequests, pendingCount, tabSpec } from '../hooks/space-model'
 import { ATTENTION, LIST } from './fixtures'
@@ -187,4 +188,14 @@ describe('savedAnswerPath', () => {
     expect(savedAnswerPath({ content: [{ type: 'text', text: '[{"a":1}]' }], isError: false })).toBeUndefined()
     expect(savedAnswerPath({ ...note('/x/tool-results/a.txt'), isError: true })).toBeUndefined()
   })
+})
+
+test('a newer plugin is a higher release; a dev lane ahead of main is not an update', () => {
+  expect(isNewer('0.5.0', '0.5.1')).toBe(true)
+  expect(isNewer('0.5.0', '0.10.0')).toBe(true)
+  expect(isNewer('0.5.1', '0.5.0')).toBe(false)
+  expect(isNewer('0.5.0', '0.5.0')).toBe(false)
+  expect(isNewer('', '0.5.1')).toBe(false)
+  expect(updateLabel({ current: '0.6.0', latest: '0.5.1' })).toBe('')
+  expect(updateLabel({ current: '0.5.0', latest: '0.5.1' })).toBe('0.5.1 available')
 })

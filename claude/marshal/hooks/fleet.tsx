@@ -7,6 +7,7 @@ import { age, cut, prLabel, runUrl, totals } from './fleet-model'
 import { answerAsk, clearRun } from './fleet-poll'
 import { renderStrip } from './autopilot-strip'
 import { mod, poll } from './state'
+import { pluginVersion } from './version-view'
 
 const fleetAtom = atom({ plugin: 'marshal', key: 'fleet' } as const, EMPTY_FLEET, { shape: 'fleet-1' })
 const answeringAtom = atom({ plugin: 'marshal', key: 'answering' } as const, null as Answering)
@@ -120,6 +121,7 @@ function header($: EngineInterface, kit: Kit, cell: FleetCell | undefined, t: Re
               {' PROD '}
             </Text>
           )}
+          {pluginVersion(kit)}
         </Box>
         <Button key="refresh" label="↻ Refresh" plain hotkey="r" dimColor onPress={() => poll($)} />
       </Box>

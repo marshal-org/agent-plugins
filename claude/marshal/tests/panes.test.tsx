@@ -17,7 +17,7 @@ const TOOLS = ['Bash', 'mcp__marshal-example__runs_attention', 'mcp__marshal-exa
 type Call = { server: string; tool: string; args: Record<string, unknown> }
 
 // The engine beneath the plugin: tools, MCP answers, the panes, the screen.
-function world(on: On, opts: { inSpace: boolean; mcp: (c: Call) => unknown | Promise<unknown>; tools?: string[]; files?: Record<string, string>; home?: string; store?: Record<string, unknown>; env?: Record<string, string> }) {
+function world(on: On, opts: { inSpace: boolean; mcp: (c: Call) => unknown | Promise<unknown>; tools?: string[]; files?: Record<string, string>; home?: string; store?: Record<string, unknown>; env?: Record<string, string>; pluginJson?: string }) {
   const calls: Call[] = []
   const opened: string[] = []
   const reads: string[] = []
@@ -40,7 +40,7 @@ function world(on: On, opts: { inSpace: boolean; mcp: (c: Call) => unknown | Pro
   })
   on('fs.read', (_, e) => {
     reads.push(e.path)
-    const body = opts.files?.[e.path]
+    const body = opts.pluginJson !== undefined && e.path.endsWith('/.claude-plugin/plugin.json') ? opts.pluginJson : opts.files?.[e.path]
     return body === undefined ? { deny: 'ENOENT' } : { value: body }
   })
   on('ui.status', (_, e) => {
@@ -396,7 +396,7 @@ test('an audit answer over the Claude Code token limit is read from the file it 
   const ui = await $.ui.mount({ ...SPACE, surface: 'terminal' })
   await ui.press({ key: 'tab:audit' })
   expect(await ui.find({ type: 'Text', text: /big\.example.*DENIED/ })).toBeDefined()
-  expect(w.reads).toEqual([saved])
+  expect(w.reads.filter(r => !r.endsWith('/.claude-plugin/plugin.json'))).toEqual([saved])
   await ui.unmount()
 })
 
@@ -524,3 +524,26 @@ test('FORCE_HYPERLINK=1 turns links on in herdr', { options: { url: 'https://mar
   expect(await ui.find({ type: 'Text', text: /FORCE_HYPERLINK/ })).toBeUndefined()
   await ui.unmount()
 })
+
+// The plugin's version in the header and the status line, and a newer one.
+for (const [name, latest, update] of [
+  ['a newer plugin on main is named next to the version', '0.5.1', true],
+  ['the newest plugin shows its version and no update', '0.5.0', false],
+  ['offline, the version shows and no update is claimed', undefined, false],
+] as const) {
+  test(name, async ($, on) => {
+    const w = world(on, { inSpace: false, mcp: fleetMcp, pluginJson: '{"name":"marshal","version":"0.5.0"}' })
+    on('http.fetch', (_, e) =>
+      latest === undefined || !e.url.includes('marshal-org/agent-plugins/main')
+        ? { deny: 'offline' }
+        : { value: { ok: true, status: 200, text: `{"version":"${latest}"}`, headers: {} } as never },
+    )
+    await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+    await w.clock.advance(3500)
+    expect(w.status.at(-1)).toBe(`◆ 1 need you · ● 1 running · ✕ 1 failed or parked · plugin v0.5.0${update ? ' (0.5.1 available)' : ''}`)
+    const ui = await $.ui.mount({ ...FLEET, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: /plugin v0\.5\.0/ })).toBeDefined()
+    expect(!!(await ui.find({ type: 'Text', text: /0\.5\.1 available · \/plugin/ }))).toBe(update)
+    await ui.unmount()
+  })
+}

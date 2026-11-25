@@ -8,7 +8,7 @@ import { loadPolicy, savePolicy, type Policy } from './autopilot-policy'
 import { age, cut, runUrl } from './fleet-model'
 
 // The Autopilot strip at the top of the fleet pane: "Autopilot is on" with a
-// moving indicator (never the mode), the latest answers and would-answers
+// moving indicator and its mode (Shadow, Routine, Cruise), the latest answers and would-answers
 // with their rule, what waits on the person, and the keys p pause, s stop,
 // e explain, o open run.
 
@@ -17,6 +17,11 @@ const uiAtom = atom({ plugin: 'marshal', key: 'autopilotUi' } as const, { select
 const fleetAtom = atom({ plugin: 'marshal', key: 'fleet' } as const, EMPTY_FLEET, { shape: 'fleet-1' })
 
 export const ON_LABEL = 'Autopilot is on'
+
+// The mode as the person reads it: "Cruise". Empty when there is no policy.
+export function modeName(mode: string): string {
+  return mode ? mode[0]!.toUpperCase() + mode.slice(1) : ''
+}
 
 // Saves the policy, or says why it could not.
 async function saved($: EngineInterface, p: Policy): Promise<boolean> {
@@ -194,10 +199,18 @@ export async function renderStrip($: EngineInterface, kit: Kit, now: number) {
       </Text>
     )
   const hasPolicy = !(v.state === 'off' && v.reason.startsWith('the policy'))
+  const mode = modeName(v.mode)
   return (
     <Box key="ap" flexDirection="column" borderStyle="round" borderColor={v.state === 'on' ? 'success' : v.state === 'paused' ? 'warning' : 'inactive'} paddingX={1} marginTop={1}>
       <Box flexDirection="row" justifyContent="space-between">
-        {lead}
+        <Box flexDirection="row" gap={1}>
+          {lead}
+          {mode !== '' && (
+            <Text key="ap:mode" bold={v.state === 'on'} dimColor={v.state !== 'on'}>
+              · {mode}
+            </Text>
+          )}
+        </Box>
         {hasPolicy && (
           <Box flexDirection="row" gap={1} flexShrink={0}>
             {v.state !== 'off' && <Button key="ap:pause" label={v.state === 'paused' ? 'Resume' : 'Pause'} hotkey="p" plain onPress={() => togglePause($)} />}

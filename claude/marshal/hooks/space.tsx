@@ -6,6 +6,7 @@ import { EMPTY_INSPECTOR, type Kit } from './atoms'
 import { age, cut } from './fleet-model'
 import { pendingCount, TABS, tabSpec, type TabId } from './space-model'
 import { poll } from './state'
+import { pluginVersion } from './version-view'
 
 const inspectorAtom = atom({ plugin: 'marshal', key: 'inspector' } as const, EMPTY_INSPECTOR, { shape: 'inspector-1' })
 const tabAtom = atom({ plugin: 'marshal', key: 'tab' } as const, 'overview')
@@ -110,6 +111,7 @@ export async function renderInspector($: EngineInterface, kit: Kit, width: numbe
             </Text>
             <Text bold>{cut(name, Math.max(10, width - 30))}</Text>
             {spaceState !== '' && <Text color={stateColor(spaceState)}>● {spaceState}</Text>}
+            {pluginVersion(kit)}
           </Box>
           <Button key="refresh" label="↻ Refresh" plain hotkey="r" dimColor onPress={() => poll($)} />
         </Box>

@@ -3,6 +3,14 @@
 Each release of the `marshal` plugin, newest first. The release on GitHub
 (`marshal-v<version>`) shows the section for its version.
 
+## 0.6.0
+
+- The fleet pane and the space inspector show the plugin's version in their header, next to
+  the Marshal they read, and the status line ends with it. When a newer version is out, they
+  name it ("0.6.1 available · /plugin"); `/plugin` updates it.
+- The Autopilot strip names the mode it runs in next to "Autopilot is on" ("· Cruise"), and the
+  status line says "Autopilot Cruise" (or "(paused)") while Autopilot is on or paused.
+
 ## 0.5.0
 
 - Marshal Autopilot's third mode is now called **Cruise** (it was Train), so it no longer

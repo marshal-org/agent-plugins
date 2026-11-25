@@ -9,6 +9,7 @@ import { renderAskBand, renderFleet } from './fleet'
 import { fleetRuns } from './fleet-poll'
 import { renderInspector, renderSpaceBand } from './space'
 import { mod, poll } from './state'
+import { LATEST_EVERY_MS, readCurrent, readLatest } from './version'
 
 // A terminal Claude Code draws no links in gets no Link: see links.ts.
 function kitOf(t: Kit, surface: string): Kit {
@@ -59,6 +60,11 @@ export const register: Register = (on, options) => {
     for (const spec of TOOL_SPECS) {
       await $.tool.register({ name: spec.name, description: spec.description, inputSchema: spec.inputSchema as Record<string, unknown> }).catch(() => undefined)
     }
+    // Which plugin runs, and whether a newer one is out: the panes' headers and
+    // the status line show both. The newest is read in the background.
+    await readCurrent($)
+    void readLatest($)
+    $.clock.every(LATEST_EVERY_MS, () => void readLatest($))
     const mode = mod.inSpace ? mod.config.space : mod.config.fleet
     if (mod.config.space === 'off' && mod.config.fleet === 'off') return next(e)
 
