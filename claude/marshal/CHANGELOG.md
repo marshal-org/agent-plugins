@@ -3,6 +3,25 @@
 Each release of the `marshal` plugin, newest first. The release on GitHub
 (`marshal-v<version>`) shows the section for its version.
 
+## 0.4.0
+
+- Marshal Autopilot answers the questions your runs ask, by rules you set, and brings you the
+  rest. Ask Claude to "set up Marshal Autopilot": the `autopilot` skill shows the modes
+  (Shadow, Routine, Train) and the never-auto list, asks a short set of questions with a
+  recommendation on each, reads your settings back in plain words and starts in Shadow, where it
+  answers nothing and shows what it would answer.
+- Add your own rules in plain words, such as "anything touching billing, ask me". Protect rules
+  always win, and takeovers, access grants, deploys to staging or production, releases and
+  deletes are never answered automatically.
+- Autopilot watches running runs' pull request checks: after the same check fails twice at the
+  same step it sends the run the failing log lines (secrets removed), and on the third it tells
+  you. A running run that goes quiet for 30 minutes is reported too.
+- The fleet pane shows an Autopilot strip: "Autopilot is on" with a moving indicator, the latest
+  answers with their rule, and what waits on you. `p` pauses, `s` stops, `e` explains the
+  selected answer and `o` opens its run.
+- A train: decisions for one batch of runs on top of your rules; your own answers during the
+  train are followed over Autopilot's.
+
 ## 0.3.7
 
 - New skill `improve-deputy`: give it a run or a deputy and it reads how the runs spent their

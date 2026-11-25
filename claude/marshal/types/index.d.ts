@@ -4,10 +4,16 @@ export type FleetAsk = {
   rung: string
   deputy: string
   question: string
+  // The offered choices as shown (whitespace collapsed).
   choices: string[]
+  // The same choices exactly as the server offers them, index for index:
+  // what an answer sends.
+  choiceTexts?: string[]
   // The title of the run that asks, so the person knows where the question
   // comes from; empty until found.
   runTitle: string
+  // RFC3339; empty when the ask does not expire or the server did not say.
+  expiresAt?: string
 }
 
 // A deputy launch waiting for a concurrency limit. Not a run yet: no run id.
@@ -104,6 +110,57 @@ export type Inspector = {
 // The ask being answered with free text, if any.
 export type Answering = { server: string; askId: string } | null
 
+
+// ── Autopilot ────────────────────────────────────────────────────────────────
+
+// What Autopilot decided about one ask, as the strip and explain show it.
+export type AutopilotOutcome = 'answered' | 'would_answer' | 'notified' | 'answered_elsewhere' | 'refused' | 'escalated' | 'nudged'
+
+export type AutopilotEntry = {
+  askId: string
+  runId: string
+  server: string
+  // The run's title or the deputy, for the row.
+  runLabel: string
+  question: string
+  outcome: AutopilotOutcome
+  // The answer sent, or the one it would send (Shadow).
+  answer: string
+  ruleId: string
+  // The rule in plain words, for explain.
+  rule: string
+  reasoning: string
+  // Why it went to the person, when it did (no rule, protect, ...).
+  reason: string
+  gate: string
+  mode: string
+  // Milliseconds since the epoch.
+  at: number
+  // The ask as asked, for explain: question and choices.
+  asked: string
+  // Minutes left before the ask expires when it was escalated; 0 otherwise.
+  expiresInMin: number
+}
+
+// The strip's state: on (any mode), paused, or off (stopped, no policy, an
+// invalid policy). The mode is never drawn in the strip.
+export type AutopilotView = {
+  state: 'on' | 'paused' | 'off'
+  // Why it is off, when it is.
+  reason: string
+  // The mode, for explain only.
+  mode: string
+  // Latest answers and would-answers, newest first.
+  recent: AutopilotEntry[]
+  // Asks Autopilot handed to the person that are still open.
+  waiting: AutopilotEntry[]
+  // When the policy file last changed (ms since the epoch); 0 when unknown.
+  policyChangedAt: number
+}
+
+// Which strip entry is selected, and whether its explanation is open.
+export type AutopilotUi = { selected: string; explaining: boolean }
+
 declare module 'claude-code' {
   interface PluginState {
     marshal: {
@@ -111,6 +168,8 @@ declare module 'claude-code' {
       answering: Answering
       inspector: Shaped<Inspector>
       tab: string
+      autopilot: Shaped<AutopilotView>
+      autopilotUi: AutopilotUi
     }
   }
 }

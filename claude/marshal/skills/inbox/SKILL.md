@@ -18,6 +18,8 @@ and say which cell each item comes from.
 4. **The person answers, not you.** Never pick an answer on their behalf. Ask them, then call
    `inbox_answer` with `ask_id` and their `answer` (use one of the `choices` exactly when the ask
    offers them).
+   - To have routine questions answered by rules the person sets, use Marshal Autopilot (the
+     `autopilot` skill), not this one.
    - Approval gates and takeovers can be answered here only when the org allows it. If
      `inbox_answer` refuses, give the person the reason and say to answer in the Marshal web app.
 5. For each failed or timed-out run: show the title, state and stop reason, and offer the

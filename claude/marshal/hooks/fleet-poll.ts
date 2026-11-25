@@ -3,6 +3,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { Answering, Fleet, FleetCell, FleetPr, FleetRun } from '../types'
 import { EMPTY_FLEET } from './atoms'
+import { ap, autopilotCycle } from './autopilot-engine'
 import { buildCell, changes, cut, errorCell, prsFrom, resultJson, savedAnswerPath, statusLine, toRun } from './fleet-model'
 
 const fleetAtom = atom({ plugin: 'marshal', key: 'fleet' } as const, EMPTY_FLEET, { shape: 'fleet-1' })
@@ -20,7 +21,19 @@ export async function callJson($: EngineInterface, server: string, tool: string,
 // hasPrs: the server lists runs_prs (older servers do not; no PRs then).
 // hasQueue: the server lists runs_cancel_queued, so its runs_list takes
 // include_queued (added before it); an older server refuses the argument.
-export type Cell = { server: string; webUrl: string; hasPrs?: boolean; hasSpaceReads?: boolean; hasAttention?: boolean; hasQueue?: boolean }
+// hasVia: inbox_answer's listing says it takes Autopilot's via note.
+export type Cell = {
+  server: string
+  webUrl: string
+  hasPrs?: boolean
+  hasSpaceReads?: boolean
+  hasAttention?: boolean
+  hasQueue?: boolean
+  hasVia?: boolean
+  hasInboxGet?: boolean
+  hasDeputyQueue?: boolean
+  hasMessage?: boolean
+}
 
 // Failed runs the person cleared from the pane, per server, kept across
 // sessions. Marshal has no "seen" mark for a run, so this is the plugin's own.
@@ -129,11 +142,35 @@ export async function pollFleet($: EngineInterface, cells: readonly Cell[], noti
   const next: Fleet = { cells: fresh, polledAt: await $.clock.now() }
   await update($, fleetAtom, () => next)
   $.ui.status(statusLine(next))
+  // Autopilot decides the new asks before they are announced: the ones it
+  // answers or would answer are not announced, the ones it hands to the
+  // person it announces itself.
+  let handled = new Set<string>()
+  try {
+    handled = await autopilotCycle($, {
+      prev,
+      next,
+      desktop: notify,
+      cells: cells.map(c => ({ server: c.server, hasPrs: c.hasPrs === true, hasVia: c.hasVia === true, hasInboxGet: c.hasInboxGet === true, hasQueue: c.hasDeputyQueue === true, hasMessage: c.hasMessage === true })),
+    })
+  } catch {
+    // Autopilot never stands between the person and their notifications.
+  }
   for (const change of changes(prev, next)) {
+    if (change.askId !== undefined && handled.has(change.askId)) continue
     $.ui.toast(change.text, { timeoutMs: change.isUrgent ? 8000 : 4000 })
     // A desktop notification only for what waits on the person.
     if (notify && change.kind === 'ask') void $.ui.notify(change.text, { title: 'Marshal' }).catch(() => undefined)
   }
+}
+
+// The runs on the board, for the Autopilot skill: which are still going,
+// and each run's deputy.
+export async function fleetRuns($: EngineInterface): Promise<{ watched: Set<string>; active: Set<string>; deputies: Map<string, string> }> {
+  const f = await read($, fleetAtom)
+  const all = f.cells.flatMap(c => [...c.attention, ...c.active, ...c.recent])
+  const active = new Set(f.cells.flatMap(c => [...c.active.map(r => r.id), ...c.asks.map(a => a.runId), ...c.attention.filter(r => r.state === 'parked').map(r => r.id)]))
+  return { watched: new Set(all.map(r => r.id)), active, deputies: new Map(all.map(r => [r.id, r.deputy])) }
 }
 
 // Answer one ask as the person. The press that calls this is the person's
@@ -141,6 +178,8 @@ export async function pollFleet($: EngineInterface, cells: readonly Cell[], noti
 export async function answerAsk($: EngineInterface, server: string, askId: string, answer: string): Promise<boolean> {
   const text = answer.trim()
   if (text === '') return false
+  // The person's own words, for the train's decisions (Autopilot).
+  ap.paneAnswers.set(askId, text)
   let isAnswered = false
   try {
     resultJson(await $.mcp.call(server, 'inbox_answer', { ask_id: askId, answer: text }))

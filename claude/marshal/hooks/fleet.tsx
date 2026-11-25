@@ -5,6 +5,7 @@ import type { Answering, FleetAsk, FleetCell, FleetPr, FleetQueued, FleetRun } f
 import { EMPTY_FLEET, type Kit } from './atoms'
 import { age, cut, prLabel, runUrl, totals } from './fleet-model'
 import { answerAsk, clearRun } from './fleet-poll'
+import { renderStrip } from './autopilot-strip'
 import { mod, poll } from './state'
 
 const fleetAtom = atom({ plugin: 'marshal', key: 'fleet' } as const, EMPTY_FLEET, { shape: 'fleet-1' })
@@ -328,7 +329,7 @@ function askCard($: EngineInterface, kit: Kit, answering: Answering, cell: Fleet
             key={`ans:${a.askId}:${i}`}
             label={cut(c, 40)}
             variant={i === 0 ? 'primary' : 'secondary'}
-            onPress={() => sendAnswer($, cell.server, a.askId, c)}
+            onPress={() => sendAnswer($, cell.server, a.askId, a.choiceTexts?.[i] ?? c)}
           />
         ))}
         {Input && !isAnswering && (
@@ -377,9 +378,11 @@ export async function renderFleet($: EngineInterface, kit: Kit, width: number, p
   const t = totals(fleet)
   const updated = age(new Date(fleet.polledAt).toISOString(), now)
 
+  const strip = mod.inSpace && !mod.fleetOpened ? undefined : await renderStrip($, kit, now)
   return (
     <Box flexDirection="column">
       {header($, kit, fleet.cells[0], t, updated)}
+      {strip}
       {fleet.cells.map(cell => (
         <Box key={`cell:${cell.server}`} flexDirection="column">
           {fleet.cells.length > 1 && section(kit, cellLabel(cell) || 'Marshal', cell.active.length)}
@@ -451,7 +454,7 @@ export async function renderAskBand($: EngineInterface, kit: Kit, width: number)
             key={`band:${a.askId}:${i}`}
             label={cut(c, 24)}
             variant={i === 0 ? 'primary' : 'secondary'}
-            onPress={() => sendAnswer($, cell.server, a.askId, c)}
+            onPress={() => sendAnswer($, cell.server, a.askId, a.choiceTexts?.[i] ?? c)}
           />
         ))}
         <Box flexDirection="row" gap={1} flexShrink={0}>

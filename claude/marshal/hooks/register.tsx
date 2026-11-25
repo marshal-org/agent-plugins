@@ -1,9 +1,12 @@
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import { FLEET_PANE, INSPECT_PANE, SPACE_SOCKET, type Kit } from './atoms'
+import { ap } from './autopilot-engine'
+import { runTool, TOOL_SPECS } from './autopilot-tools'
 import { readConfig } from './config'
 import { terminalLinks } from './links'
 import { renderAskBand, renderFleet } from './fleet'
+import { fleetRuns } from './fleet-poll'
 import { renderInspector, renderSpaceBand } from './space'
 import { mod, poll } from './state'
 
@@ -17,8 +20,25 @@ function kitOf(t: Kit, surface: string): Kit {
     ...(t.Link && (surface !== 'terminal' || mod.links) && { Link: t.Link }),
     ...(t.Progress && { Progress: t.Progress }),
     ...(t.Markdown && { Markdown: t.Markdown }),
+    ...(t.Client && { Client: t.Client }),
   }
 }
+
+// The Autopilot skill's tools: read and write the policy, the overlay and
+// the journal through the plugin's own policy module.
+async function autopilotTool($: EngineInterface, name: string, e: Record<string, unknown>) {
+  const { tool: _tool, tool_use_id: _id, ...args } = e
+  try {
+    const result = await runTool($, name, args, { server: mod.cell?.server ?? '', activeRunIds: () => fleetRuns($) })
+    // A registered tool's result is what an MCP tool returns: text or
+    // content blocks, never an object (core refuses one). JSON text it is.
+    return { result: JSON.stringify(result, null, 2) as never }
+  } catch (err) {
+    return { deny: `${TOOL_FAILED} ${err instanceof Error ? err.message : String(err)}` }
+  }
+}
+
+const TOOL_FAILED = 'Marshal Autopilot could not run this tool. Nothing was changed.'
 
 export const NOT_IN_SPACE =
   'The space inspector works only inside a Marshal space: it shows the space it runs in. Open it from Claude Code in a space. On this machine, /marshal-fleet shows your runs.'
@@ -33,6 +53,12 @@ export const register: Register = (on, options) => {
       .stat(SPACE_SOCKET)
       .then(() => true)
       .catch(() => false)
+    ap.spaceHosted = mod.inSpace
+    ap.pollMs = mod.config.pollMs
+    // Autopilot's tools exist wherever the hooks run; the skill calls them.
+    for (const spec of TOOL_SPECS) {
+      await $.tool.register({ name: spec.name, description: spec.description, inputSchema: spec.inputSchema as Record<string, unknown> }).catch(() => undefined)
+    }
     const mode = mod.inSpace ? mod.config.space : mod.config.fleet
     if (mod.config.space === 'off' && mod.config.fleet === 'off') return next(e)
 
@@ -71,6 +97,14 @@ export const register: Register = (on, options) => {
     void poll($)
     return { text: opened.isPlaced ? 'Marshal space inspector opened.' : `The inspector is waiting: ${opened.reason}` }
   })
+
+  // One hook per Autopilot tool. Some tsc runs give up on the engine's
+  // tool.call overloads here (TS2589, "excessively deep") and some do not, so
+  // this is @ts-ignore, not @ts-expect-error (which fails where tsc copes).
+  for (const spec of TOOL_SPECS) {
+    // @ts-ignore TS2589: the tool.call overloads can be too deep for tsc.
+    on('tool.call', { tool: `mcp__marshal__${spec.name}` }, async ($: EngineInterface, e: unknown) => autopilotTool($, spec.name, e as never)).catch(() => ({ deny: TOOL_FAILED }))
+  }
 
   on('ui.render', { component: 'Pane', requestId: 'marshal-fleet' }, async ($, e) =>
     renderFleet($, kitOf($.ui.resolve(e) as Kit, e.surface), e.props.bodyColumns, mod.problem),

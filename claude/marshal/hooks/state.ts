@@ -23,8 +23,14 @@ export const mod = {
   links: true,
 }
 
+// inbox_answer's description names the optional via note ("via: a short
+// note stored with the answer"). "via" alone is not enough: a description
+// may say an ask was answered via Slack.
+export const VIA_LISTED = /\bvia\b.{0,80}\bnote\b|\bnote\b.{0,80}\bvia\b/i
+
 export async function findCell($: EngineInterface): Promise<Cell | undefined> {
-  const names = (await $.tool.list()).map(t => t.name)
+  const listed = await $.tool.list()
+  const names = listed.map(t => t.name)
   // Inside a space the plugin's own server (the default url, Marshal cloud) is
   // never the one to read: the space's own Marshal server is.
   const found = marshalServers(names).filter(s => !mod.inSpace || s !== OWN_SERVER)
@@ -55,7 +61,21 @@ export async function findCell($: EngineInterface): Promise<Cell | undefined> {
   // go there. The placeholder default is never used (readConfig drops it).
   if (!webUrl && !mod.inSpace) webUrl = webBase(mod.config.url)
   const tools = toolsOf(server, names)
-  return { server, webUrl, hasPrs: tools.has('runs_prs'), hasAttention: tools.has('runs_attention'), hasQueue: tools.has('runs_cancel_queued'), hasSpaceReads: tools.has('spaces_usage') && tools.has('spaces_changes') }
+  // A server that stores Autopilot's via note says so in inbox_answer's
+  // description: the listing carries no input schema for an MCP tool.
+  const answerTool = listed.find(t => t.name === `mcp__${server}__inbox_answer`)
+  return {
+    server,
+    webUrl,
+    hasPrs: tools.has('runs_prs'),
+    hasAttention: tools.has('runs_attention'),
+    hasQueue: tools.has('runs_cancel_queued'),
+    hasSpaceReads: tools.has('spaces_usage') && tools.has('spaces_changes'),
+    hasVia: answerTool !== undefined && VIA_LISTED.test(answerTool.description),
+    hasInboxGet: tools.has('inbox_get'),
+    hasDeputyQueue: tools.has('deputies_queue'),
+    hasMessage: tools.has('runs_message'),
+  }
 }
 
 export async function poll($: EngineInterface): Promise<void> {

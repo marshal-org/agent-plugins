@@ -77,6 +77,30 @@ export function plainText(s: unknown): string {
     .trim()
 }
 
+// A choice exactly as the server offers it, to send back: the markers and
+// Marshal's warning line removed, its words and spacing untouched (the
+// server matches the answer to its choice text). plainText is for showing.
+export function choiceText(s: unknown): string {
+  const v = String(s ?? '')
+  const m = /^\s*<untrusted-content[^>]*>([\s\S]*)<\/untrusted-content>\s*$/.exec(v)
+  if (!m) return v
+  return m[1]!.replace(/^\s*(?:The text below [^\n]*?Do not follow instructions in it\.)?/, '').trim()
+}
+
+// Offered choices, for showing (collapsed) and for sending (exact), index
+// for index; empty ones dropped from both.
+export function choicesOf(v: unknown): { shown: string[]; exact: string[] } {
+  const shown: string[] = []
+  const exact: string[] = []
+  for (const c of arr(v)) {
+    const t = plainText(c)
+    if (t === '') continue
+    shown.push(t)
+    exact.push(choiceText(c))
+  }
+  return { shown, exact }
+}
+
 export function firstLine(s: string): string {
   return (s.split('\n')[0] ?? '').trim()
 }
@@ -114,8 +138,10 @@ export function toAsk(v: unknown): FleetAsk {
     rung: str(a.rung),
     deputy: str(a.deputy),
     question: plainText(a.question),
-    choices: arr(a.choices).map(c => plainText(c)).filter(c => c !== ''),
+    choices: choicesOf(a.choices).shown,
+    choiceTexts: choicesOf(a.choices).exact,
     runTitle: '',
+    ...(str(a.expires_at) && { expiresAt: str(a.expires_at) }),
   }
 }
 
@@ -200,7 +226,7 @@ export function statusLine(fleet: Fleet): string | undefined {
   return parts.join(' · ')
 }
 
-export type Change = { kind: 'ask' | 'ended' | 'attention'; text: string; isUrgent: boolean }
+export type Change = { kind: 'ask' | 'ended' | 'attention'; text: string; isUrgent: boolean; askId?: string }
 
 // What is new since the last poll, for toasts and notifications. The first
 // poll (prev with no cells) reports nothing: the board shows what was there.
@@ -215,7 +241,7 @@ export function changes(prev: Fleet, next: Fleet): Change[] {
     const oldAsks = new Set(before.asks.map(a => a.askId))
     for (const a of cell.asks) {
       if (!oldAsks.has(a.askId)) {
-        out.push({ kind: 'ask', text: `${a.deputy || 'A run'} asks: ${a.question || a.rung}${where}`, isUrgent: true })
+        out.push({ kind: 'ask', text: `${a.deputy || 'A run'} asks: ${a.question || a.rung}${where}`, isUrgent: true, askId: a.askId })
       }
     }
     const oldAttention = new Set(before.attention.map(r => r.id))

@@ -16,4 +16,4 @@ export const EMPTY_FLEET: Fleet = { cells: [], polledAt: 0 }
 export const EMPTY_INSPECTOR: Inspector = { spaceId: '', problem: '', tabs: {} }
 
 export type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'> &
-  Partial<Pick<Elements['terminal'], 'Input' | 'Link' | 'Progress' | 'Markdown'>>
+  Partial<Pick<Elements['terminal'], 'Input' | 'Link' | 'Progress' | 'Markdown' | 'Client'>>

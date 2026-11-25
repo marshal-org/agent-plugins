@@ -19,6 +19,7 @@ One plugin, `marshal`, in `claude/marshal/`:
 | Part | Where it works | What it does |
 |---|---|---|
 | Skills `delegate`, `inbox`, `debug-run`, `improve-deputy`, `suggest-stack` | Anywhere the Marshal MCP is connected | Teach Claude to hand a task to a Marshal run, triage what waits on you, find why a run failed, find where a deputy's runs lose time and money and what to change, and build the org's first stack and manifests from your repositories |
+| Marshal Autopilot, skill `autopilot` | Claude Code (it runs in the plugin's hooks) | Answers the questions your runs ask, by rules you set, and notifies you about the rest; starts in Shadow (shows what it would answer). Watches running runs' PR checks and tells a run which check failed and why. Policy, train overlay and journal are local files, mode 0600, in the plugin's data folder |
 | Fleet pane `/marshal-fleet` | Claude Code on a laptop, or inside a space with `marshal-orchestration` | Your runs on one Marshal cell: what needs you (answer with a press), failed or parked, running, queued, recently ended. Status line, toasts, a desktop notification on a new ask |
 | Space inspector `/marshal-space` | Claude Code inside a Marshal space (elsewhere the command says so) | The space's own overview, audit, requests, reviews, ports, changes and cost. Read only |
 
@@ -77,7 +78,7 @@ carries `marshal-plugin-<version>.zip` and its `.sha256`: the plugin alone, with
    the plugin's `url` setting) and sign in. Your org must have MCP access turned on.
 
 In Claude Desktop the upload gives you the skills (`delegate`, `inbox`, `debug-run`,
-`improve-deputy`, `suggest-stack`). The panes are a Claude Code mod and run in the Claude Code terminal. The live
+`improve-deputy`, `suggest-stack`; `autopilot` needs Claude Code, where the plugin's hooks run). The panes are a Claude Code mod and run in the Claude Code terminal. The live
 view in Claude Desktop is the fleet card: ask "show my Marshal fleet" (see below).
 
 What it shows:
@@ -90,6 +91,9 @@ What it shows:
 - **Band above the prompt**: the first open ask and the run it comes from, answerable in place. No digit hotkeys on purpose: an
   answer can merge a PR, so it takes a deliberate click.
 - **Status line and toasts**, and a desktop notification on a new ask.
+- **Autopilot strip** at the top of the pane, once Autopilot is set up: "Autopilot is on" with a
+  moving indicator, the latest answers and would-answers with their rule, and what waits on you.
+  `p` pause or resume, `s` stop or turn on, `e` explain the selected entry, `o` open its run.
 
 Chat apps that show MCP Apps cards (Claude Desktop, for one) get the same fleet as a card in the
 conversation, from the Marshal MCP's `fleet` tool: the same sections, a refresh every 20 seconds
@@ -128,7 +132,7 @@ claude --plugin-dir .        # a session with the plugin loaded from disk, hot r
 ```
 
 Type-check: the engine writes its API types into `.claude-plugin/types/` (git-ignored) when it
-loads the plugin from a folder; then `npx -p typescript@5.6 tsc -p .`.
+loads the plugin from a folder; then `npx -y -p typescript@5.6.3 tsc -p .`.
 
 Rules the validator enforces, learned the hard way:
 
@@ -138,3 +142,10 @@ Rules the validator enforces, learned the hard way:
   `plugin` and `key`.
 - `ui.render` matchers use literal ids.
 - Commands register as `/<name>`, not `/<plugin>:<name>`.
+- `$` is never put in an object: pass it as a parameter.
+
+Autopilot's model eval (`evals/autopilot-eval.sh`) runs the decision prompt against a real model
+through `claude -p` and fails on any protect or never-auto miss. Run it on any change to the
+decision prompt (`hooks/autopilot-decide.ts`, `hooks/autopilot-presets.ts`); it spends tokens.
+
+CI (`agent-plugins-test`) runs validate, test and tsc on every PR that touches this folder.
