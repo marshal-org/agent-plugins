@@ -120,7 +120,7 @@ export const watch = {
   cursor: 0,
   // When each running run last showed activity (a push, a question, a new
   // state), and whether its silence was reported.
-  runs: new Map<string, { state: string; since: number; reported: boolean }>(),
+  runs: new Map<string, { state: string; since: number; reported: boolean; turnReadAt?: number }>(),
 }
 
 export function resetWatch(): void {

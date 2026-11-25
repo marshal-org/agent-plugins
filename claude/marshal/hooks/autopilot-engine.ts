@@ -42,6 +42,8 @@ export type ApCell = {
   hasTimeout?: boolean
   hasContinue?: boolean
   hasStop?: boolean
+  // runs_usage: the run's latest model turn, the real sign it is working.
+  hasUsage?: boolean
   // In a space with answer_children: read with children_ask_get, answer with
   // children_ask_answer. The space has no inbox tools and no deputies_queue.
   hasChildAsks?: boolean
@@ -659,20 +661,51 @@ async function watchRuns($: EngineInterface, c: Cycle, cell: FleetCell, apc: ApC
   for (const r of running) {
     const s = watch.runs.get(r.id)
     if (!s || s.reported || c.now - s.since < limit) continue
+    // Before calling a run silent, ask what it last did: its latest model
+    // turn (runs_usage). A run that pushes nothing for an hour while it
+    // works is not silent. Read at most every TURN_READ_MS per run.
+    if (apc.hasUsage && c.now - (s.turnReadAt ?? 0) >= TURN_READ_MS) {
+      s.turnReadAt = c.now
+      const last = await lastTurnAt($, cell.server, r.id)
+      if (last !== undefined && last > s.since) s.since = last
+      if (c.now - s.since < limit) continue
+    }
     s.reported = true
     const label = r.title || r.id.slice(0, 8)
     const w: PrWatch = { key: '', server: cell.server, runId: r.id, repo: '', number: 0, readAt: 0, head: '', ids: new Map(), skipped: '' }
     await record($, { ...checkEntry(c, w, label, 'notified', '', `silent for ${Math.round((c.now - s.since) / 60_000)} minutes`), pr: '' })
-    checkNotice(c, label, `running for ${Math.round((c.now - s.since) / 60_000)} minutes with no new push, question or state`)
+    checkNotice(c, label, apc.hasUsage ? `no model turn for ${Math.round((c.now - s.since) / 60_000)} minutes` : `running for ${Math.round((c.now - s.since) / 60_000)} minutes with no new push, question or state`)
+  }
+}
+
+// How often a run's latest turn is read when it looks quiet.
+export const TURN_READ_MS = 5 * 60_000
+
+// The time of a run's latest model turn, from runs_usage; undefined when it
+// cannot be read.
+async function lastTurnAt($: EngineInterface, server: string, runId: string): Promise<number | undefined> {
+  try {
+    const u = resultJson(await $.mcp.call(server, 'runs_usage', { run_id: runId })) as { conversations?: { last_turn_at?: unknown }[] }
+    let latest: number | undefined
+    for (const conv of u.conversations ?? []) {
+      const t = typeof conv.last_turn_at === 'string' ? Date.parse(conv.last_turn_at) : NaN
+      if (Number.isFinite(t) && (latest === undefined || t > latest)) latest = t
+    }
+    return latest
+  } catch {
+    return undefined
   }
 }
 
 // ── Run care (policy care) ───────────────────────────────────────────────────
 // What the orchestrate watcher did for runs, by the person's switches: add
-// time before a run runs out, stop a run that is stuck (never one whose pull
-// request merged) and resume it, resume a run that ended failed or timed out
+// time before a run runs out, and resume a run that ended failed or timed out
 // with an open pull request. Each run is resumed at most once; a second
 // failure goes to the person. Shadow only writes what it would do.
+//
+// Autopilot never stops a run. Marshal keeps no conversation for a stopped
+// run, so a stop cannot be resumed, and "no activity" is too weak a signal for
+// something that cannot be undone (0.7.0 stopped two working runs).
 
 export const EXTEND_EVERY_MS = 90 * 60_000
 export const EXTEND_SECS = 2 * 3600
@@ -784,36 +817,6 @@ async function careRuns($: EngineInterface, c: Cycle, cell: FleetCell, apc: ApCe
       } catch (err) {
         await record($, careEntry(c, cell.server, r, 'notified', 'extend', `could not add time: ${firstLine(err instanceof Error ? err.message : String(err))}`))
       }
-    }
-  }
-
-  if (care.stopStuck && apc.hasStop) {
-    const limit = 2 * c.policy.limits.silenceMinutes * 60_000
-    for (const r of running) {
-      const seenRun = watch.runs.get(r.id)
-      if (!seenRun || c.now - seenRun.since < limit || asking.has(r.id) || lastCare(r.id, 'stop')) continue
-      const minutes = Math.round((c.now - seenRun.since) / 60_000)
-      const label = r.title || r.id.slice(0, 8)
-      // Marshal records any outside stop as canceled, even after a merge:
-      // a run whose pull request merged is never stopped.
-      if ((r.prs ?? []).some(p => p.state === 'merged')) {
-        await record($, careEntry(c, cell.server, r, 'notified', 'stop', `silent ${minutes} minutes, but its pull request merged: not stopped`))
-        checkNotice(c, label, `silent ${minutes} minutes after its pull request merged; not stopped`)
-        continue
-      }
-      if (shadow) {
-        await record($, careEntry(c, cell.server, r, 'notified', 'stop', `Shadow: would stop it (silent ${minutes} minutes) and resume it`))
-        continue
-      }
-      try {
-        resultJson(await $.mcp.call(cell.server, 'runs_stop', { run_id: r.id }))
-        await record($, careEntry(c, cell.server, r, 'cared', 'stop', `stopped it: silent ${minutes} minutes with no question`))
-      } catch (err) {
-        await record($, careEntry(c, cell.server, r, 'notified', 'stop', `could not stop it: ${firstLine(err instanceof Error ? err.message : String(err))}`))
-        checkNotice(c, label, `stuck (silent ${minutes} minutes) and Autopilot could not stop it`)
-        continue
-      }
-      await resumeRun($, c, cell, apc, r, `stuck, silent ${minutes} minutes; Autopilot stopped it`)
     }
   }
 

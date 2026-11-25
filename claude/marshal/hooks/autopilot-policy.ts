@@ -33,12 +33,9 @@ export type Care = {
   // Resume a run that ended failed or timed out with an open pull request,
   // once (runs_continue with "resume the existing PR").
   relaunch: boolean
-  // Stop a run that is stuck (silent past twice the silence limit, no open
-  // question), never one whose pull request merged; then resume it once.
-  stopStuck: boolean
 }
 
-export const DEFAULT_CARE: Care = { extendTimeouts: true, relaunch: true, stopStuck: true }
+export const DEFAULT_CARE: Care = { extendTimeouts: true, relaunch: true }
 
 export type Policy = {
   version: 1
@@ -225,7 +222,6 @@ export function validatePolicy(y: Yaml): Policy {
     care: {
       extendTimeouts: bool(care.extend_timeouts, 'care.extend_timeouts', DEFAULT_CARE.extendTimeouts),
       relaunch: bool(care.relaunch, 'care.relaunch', DEFAULT_CARE.relaunch),
-      stopStuck: bool(care.stop_stuck, 'care.stop_stuck', DEFAULT_CARE.stopStuck),
     },
     model: str(y.model, 'model', DEFAULT_MODEL) || DEFAULT_MODEL,
     notifyDesktop: bool(notify.desktop, 'notify.desktop', true),
@@ -263,7 +259,7 @@ export function policyYaml(p: Policy): string {
     servers: [...p.servers],
     merge_bar: p.mergeBar,
     model: p.model,
-    care: { extend_timeouts: p.care.extendTimeouts, relaunch: p.care.relaunch, stop_stuck: p.care.stopStuck },
+    care: { extend_timeouts: p.care.extendTimeouts, relaunch: p.care.relaunch },
     notify: { desktop: p.notifyDesktop },
     limits: {
       answers_per_cycle: p.limits.answersPerCycle,
@@ -327,7 +323,7 @@ export function policyWords(p: Policy): string[] {
     `Merge bar ${p.mergeBar ? `on: Cruise approves a merge only when ${p.mergeBarWords ? `your bar holds ("${p.mergeBarWords}") and ` : ''}required checks pass, reviews are given and no thread is open at the head` : 'off: merges always go to you'}.`,
     `Desktop notifications ${p.notifyDesktop ? 'on' : 'off'} (toasts and the strip always).`,
     p.reach.length ? `Also reaches you through ${list(p.reach.map(r => r.says || `${r.server} ${r.tool}`))}.` : 'Reaches you only in this session (no other channel set).',
-    `Takes care of runs: ${[p.care.extendTimeouts ? 'adds time before a run runs out' : '', p.care.relaunch ? 'resumes a run that failed with an open pull request, once' : '', p.care.stopStuck ? 'stops a stuck run (never one whose pull request merged) and resumes it once' : ''].filter(Boolean).join('; ') || 'off'}.`,
+    `Takes care of runs: ${[p.care.extendTimeouts ? 'adds time before a run runs out' : '', p.care.relaunch ? 'resumes a run that failed with an open pull request, once' : ''].filter(Boolean).join('; ') || 'off'}.`,
     `At most ${p.limits.answersPerCycle} answers per check; more than ${p.limits.notifyGroupOver} notices at once are grouped; questions under ${p.limits.expiryMinutes} minutes from expiry are escalated; a running run silent for ${p.limits.silenceMinutes} minutes is reported.`,
     ...p.components.map(c => `Component ${c.name}: ${c.repo ? `${c.repo} ` : ''}${c.paths.join(', ')}.`),
     ...p.rules.map(r => ruleWords(r, p.components)),

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { marshalServers, pickServer, readConfig } from '../hooks/config'
 import { isNewer, updateLabel } from '../hooks/version'
+import { costLabel } from '../hooks/fleet-model'
 import { buildCell, changes, plainText, prLabel, prsFrom, resultJson, savedAnswerPath, serverUrl, statusLine, webBase } from '../hooks/fleet-model'
 import { formatAudit, formatCost, formatPorts, formatRequests, pendingCount, tabSpec } from '../hooks/space-model'
 import { ATTENTION, LIST } from './fixtures'
@@ -198,4 +199,11 @@ test('a newer plugin is a higher release; a dev lane ahead of main is not an upd
   expect(isNewer('', '0.5.1')).toBe(false)
   expect(updateLabel({ current: '0.6.0', latest: '0.5.1' })).toBe('')
   expect(updateLabel({ current: '0.5.0', latest: '0.5.1' })).toBe('0.5.1 available')
+})
+
+test('a run row shows its cost: exact once ended, marked as growing while it runs', () => {
+  expect(costLabel({ costUsd: 16.514, completedAt: '2026-11-25T14:53:58Z' })).toBe('$16.5')
+  expect(costLabel({ costUsd: 4.2, completedAt: '' })).toBe('~$4.20')
+  expect(costLabel({ costUsd: 169.4, completedAt: 'x' })).toBe('$169')
+  expect(costLabel({ completedAt: 'x' })).toBe('')
 })

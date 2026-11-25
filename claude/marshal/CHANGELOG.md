@@ -3,6 +3,16 @@
 Each release of the `marshal` plugin, newest first. The release on GitHub
 (`marshal-v<version>`) shows the section for its version.
 
+## 0.7.2
+
+- Marshal Autopilot never stops a run. 0.7.0 stopped a run it took for stuck and then resumed
+  it, but a stopped run keeps no conversation, so it could not be resumed, and two working
+  runs were lost that way. A saved `care.stop_stuck` setting is ignored.
+- A quiet run is judged by its own latest model turn, not by pushes or questions, so a run
+  working for an hour without pushing is not reported as silent.
+- The fleet pane shows each run's estimated cost on its row ("$16.5", "~$4.20" while it
+  runs), when the Marshal server lists it.
+
 ## 0.7.1
 
 - Changing a Marshal Autopilot setting during setup no longer resets the mode: a setup that

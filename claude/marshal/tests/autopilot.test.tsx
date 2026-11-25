@@ -1511,14 +1511,14 @@ test('#3016 Q4: a run that failed with an open PR is resumed once; a second fail
   expect(w.notified.some(n => /again after Autopilot resumed it/.test(n))).toBe(true)
 })
 
-test('#3016 Q4: a stuck run is stopped and resumed; one whose PR merged is never stopped', async ($, on) => {
-  const merged = { events: [{ action: 'merged', repo: 'acme/app', number: 5, url: 'https://github.com/acme/app/pull/5', outcome: { state: 'merged' } }] }
-  const w = careWorld(on, { runs: [running('run-s'), running('run-m')], prs: { 'run-s': prEvents('acme/app', 4), 'run-m': merged }, extra: 'care:\n  extend_timeouts: false' })
+test('Autopilot never stops a run, however long it is quiet, even with an old stop_stuck setting', async ($, on) => {
+  // 0.7.0 stopped two working continuation runs as "stuck"; a stopped run
+  // keeps no conversation, so it cannot be resumed. The setting is ignored.
+  const w = careWorld(on, { runs: [running('run-s')], prs: { 'run-s': prEvents('acme/app', 4) }, extra: 'care:\n  extend_timeouts: false\n  stop_stuck: true' })
   await start($, w)
-  await w.clock.advance(61 * 60_000)
-  expect(w.calls.filter(c => c.tool === 'runs_stop').map(c => c.args.run_id)).toEqual(['run-s'])
-  expect(w.calls.filter(c => c.tool === 'runs_continue').map(c => c.args.run_id)).toEqual(['run-s'])
-  expect(w.journal().some(e => e.run_id === 'run-m' && /merged: not stopped/.test(String(e.reason)))).toBe(true)
+  await w.clock.advance(125 * 60_000)
+  expect(w.calls.filter(c => c.tool === 'runs_stop' || c.tool === 'runs_continue')).toEqual([])
+  expect(w.files.get(POLICY)!.text).toContain('stop_stuck: true')
 })
 
 test('#3016 Q6: a notice also reaches the person through the channel they named', async ($, on) => {
@@ -1545,13 +1545,13 @@ test('#3016: the merge bar words, reach and care survive a rule change', async (
     merge_bar: true,
     merge_bar_words: 'two AI reviews',
     reach: [{ server: 'slack', tool: 'send_message', args: { channel: 'D1', text: '{text}' }, says: 'Slack' }],
-    care: { stop_stuck: false },
+    care: { relaunch: false },
   })
   await tool($, 'autopilot_rules', { op: 'add', confirm: true, rule: { id: 'docs-ok', action: 'answer', kinds: ['proceed'], guidance: 'go' } })
   const f = w.files.get(POLICY)!.text
   expect(f).toContain('merge_bar_words: two AI reviews')
   expect(f).toContain('server: slack')
-  expect(f).toContain('stop_stuck: false')
+  expect(f).toContain('relaunch: false')
   const read = (await tool($, 'autopilot_status')).policy as string[]
   expect(read.join('\n')).toMatch(/your bar holds \("two AI reviews"\)/)
   expect(read.join('\n')).toMatch(/Also reaches you through Slack/)
@@ -1665,4 +1665,24 @@ test('#3016: the run is messaged at most once per question, across re-decisions'
   await start($, w)
   await w.clock.advance(11 * 60_000)
   expect(w.calls.filter(c => c.tool === 'runs_message')).toHaveLength(1)
+})
+
+test('a run that keeps taking model turns is never reported silent; one that stopped is', async ($, on) => {
+  let lastTurn = new Date(NOW).toISOString()
+  const w = world(on, {
+    files: { [POLICY]: policyYaml({ mode: 'cruise', extra: 'care:\n  extend_timeouts: false' }) },
+    runs: [running('run-w')],
+    tools: toolsFor(SERVER, ['runs_usage']),
+    mcp: c => (c.tool === 'runs_usage' ? text({ conversations: [{ last_turn_at: lastTurn }] }) : c.tool === 'runs_prs' ? text({ events: [] }) : undefined),
+  })
+  await start($, w)
+  // Working: a turn every few minutes, no push, no question.
+  for (let i = 0; i < 9; i++) {
+    lastTurn = new Date(NOW + i * 5 * 60_000).toISOString()
+    await w.clock.advance(5 * 60_000)
+  }
+  expect(w.notified.filter(n => /no model turn|silent|with no new push/.test(n))).toEqual([])
+  // Then it stops taking turns.
+  await w.clock.advance(36 * 60_000)
+  expect(w.notified.filter(n => /no model turn for/.test(n))).toHaveLength(1)
 })

@@ -547,3 +547,13 @@ for (const [name, latest, update] of [
     await ui.unmount()
   })
 }
+
+test('the fleet pane shows the cost of each run when the server lists it', async ($, on) => {
+  const list = { runs: [{ id: 'run-c', state: 'succeeded', title: '#7 priced run', deputy: 'shipper', created_at: '2026-11-16T09:00:00Z', completed_at: '2026-11-16T09:40:00Z', cost_usd: 16.51 }] }
+  const w = world(on, { inSpace: false, mcp: c => (c.tool === 'runs_list' ? text(list) : c.tool === 'runs_attention' ? text({ asks: [], runs: [] }) : fleetMcp(c)) })
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await w.clock.advance(3500)
+  const ui = await $.ui.mount({ ...FLEET, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /^\$16\.5$/ })).toBeDefined()
+  await ui.unmount()
+})

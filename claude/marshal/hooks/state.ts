@@ -92,6 +92,7 @@ async function cellFor($: EngineInterface, server: string, listed: Listed): Prom
     hasTimeout: tools.has('runs_timeout'),
     hasContinue: tools.has('runs_continue') && tools.has('runs_continuation'),
     hasStop: tools.has('runs_stop'),
+    hasUsage: tools.has('runs_usage'),
     // A space whose orchestration turns on answer_children: its children's
     // asks are read and answered through these three tools, never the inbox.
     hasChildAsks: tools.has('children_attention') && tools.has('children_ask_get') && tools.has('children_ask_answer'),

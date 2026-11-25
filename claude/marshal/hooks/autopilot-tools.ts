@@ -60,7 +60,7 @@ export const TOOL_SPECS = [
           items: { ...obj, properties: { server: { type: 'string' }, tool: { type: 'string' }, args: { ...obj }, says: { type: 'string' } } },
           description: "other ways to reach the person, through tools this session has: [{ server, tool, args with {text} where the notice goes, says: the person's words }], e.g. a Slack MCP's send-message tool to their DM. Empty list: only this session (toasts, strip, desktop)",
         },
-        care: { ...obj, properties: { extend_timeouts: { type: 'boolean' }, relaunch: { type: 'boolean' }, stop_stuck: { type: 'boolean' } }, description: 'taking care of runs; each on by default' },
+        care: { ...obj, properties: { extend_timeouts: { type: 'boolean' }, relaunch: { type: 'boolean' } }, description: 'taking care of runs; each on by default' },
         model: { type: 'string', description: 'model alias for decisions; default sonnet' },
         limits: { ...obj, properties: { answers_per_cycle: { type: 'number' }, expiry_minutes: { type: 'number' }, silence_minutes: { type: 'number' }, notify_group_over: { type: 'number' }, journal_days: { type: 'number' } } },
         confirm: { type: 'boolean' },
@@ -351,5 +351,5 @@ function reachRaw(p: Policy): Args[] {
 }
 
 function careRaw(p: Policy): Args {
-  return { extend_timeouts: p.care.extendTimeouts, relaunch: p.care.relaunch, stop_stuck: p.care.stopStuck }
+  return { extend_timeouts: p.care.extendTimeouts, relaunch: p.care.relaunch }
 }

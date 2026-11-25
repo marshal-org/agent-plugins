@@ -128,7 +128,15 @@ export function toRun(v: unknown): FleetRun {
     stopReason: plainText(r.stop_reason),
     createdAt: str(r.created_at),
     completedAt: str(r.completed_at),
+    ...(typeof r.cost_usd === 'number' && Number.isFinite(r.cost_usd) && { costUsd: r.cost_usd }),
   }
+}
+
+// "$16.51", or "~$4.20" while the run is still going (the cost grows).
+export function costLabel(r: Pick<FleetRun, 'costUsd' | 'completedAt'>): string {
+  if (r.costUsd === undefined) return ''
+  const v = r.costUsd < 10 ? r.costUsd.toFixed(2) : r.costUsd < 100 ? r.costUsd.toFixed(1) : Math.round(r.costUsd).toString()
+  return (r.completedAt ? '' : '~') + '$' + v
 }
 
 export function toAsk(v: unknown): FleetAsk {

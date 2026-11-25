@@ -48,6 +48,9 @@ export type FleetRun = {
   completedAt: string
   // Its pull requests, when the server has runs_prs; absent before the read.
   prs?: FleetPr[]
+  // Its estimated cost so far in USD (runs_list cost_usd); absent when the
+  // server does not say.
+  costUsd?: number
 }
 
 export type FleetCell = {

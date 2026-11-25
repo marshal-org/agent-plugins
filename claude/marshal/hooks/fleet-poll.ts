@@ -42,6 +42,7 @@ export type Cell = {
   hasTimeout?: boolean
   hasContinue?: boolean
   hasStop?: boolean
+  hasUsage?: boolean
   hasChildAsks?: boolean
 }
 
@@ -184,6 +185,7 @@ export async function pollFleet($: EngineInterface, cells: readonly Cell[], noti
         hasTimeout: c.hasTimeout === true,
         hasContinue: c.hasContinue === true,
         hasStop: c.hasStop === true,
+        hasUsage: c.hasUsage === true,
         hasChildAsks: c.hasChildAsks === true,
       })),
     })

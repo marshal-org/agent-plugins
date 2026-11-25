@@ -13,8 +13,8 @@ the PR branch, and the run's state and logs, and it may message the run that ask
 "send the brief questions as text"). Then it answers as the person (with a note that says it was
 Autopilot and which rule), shows what it would answer (Shadow), waits and decides again later
 (checks still running, the merge bar not met yet), or hands it to the person. It also watches
-running runs' pull request checks and takes care of runs: adds time before a run runs out, stops
-a stuck run and resumes it, resumes a run that failed with an open pull request (once each). The
+running runs' pull request checks and takes care of runs: adds time before a run runs out, and
+resumes a run that failed with an open pull request (once). It never stops a run. The
 fleet pane (`/marshal-fleet`) shows a strip that says "Autopilot is on" and its mode, what it
 answered and why, what it waits on, and what waits on the person.
 
@@ -41,8 +41,8 @@ and `problem` when something is wrong. Show the person:
   the repository's own required checks and reviews with no open review threads. The run
   merges, never Autopilot.
 - **Run care** (Routine and Cruise; Shadow only writes what it would do): more time before a run
-  runs out, a stuck run stopped and resumed (never one whose pull request merged), a run that
-  failed with an open pull request resumed once. A second failure goes to the person.
+  runs out, and a run that failed with an open pull request resumed once. Autopilot never stops
+  a run. A second failure goes to the person.
 - **Never auto-answered, in any mode**: the `never_auto` list (takeovers, access or credential
   grants, deploys to staging or production, releases, deletes). No rule can change it.
 
@@ -81,7 +81,7 @@ brief, each item with your recommendation pre-selected:
    a message (a Slack MCP's send tool, for example) and offer each, or "just wait". For a tool,
    ask for its arguments (the channel or DM id) and put `{text}` where the notice goes.
    Recommend: desktop on, plus their Slack DM when a Slack MCP is connected.
-6. **Run care**: add time before a run runs out, stop and resume a stuck run, resume a run that
+6. **Run care**: add time before a run runs out, and resume a run that
    failed with an open pull request. Recommend: all on.
 7. **Limits**: answers per check (3), notice grouping (over 3), escalate under 10 minutes to
    expiry, report a running run silent for 30 minutes. Recommend the defaults.

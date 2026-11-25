@@ -3,7 +3,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { Answering, FleetAsk, FleetCell, FleetPr, FleetQueued, FleetRun } from '../types'
 import { EMPTY_FLEET, type Kit } from './atoms'
-import { age, cut, prLabel, runUrl, totals } from './fleet-model'
+import { age, costLabel, cut, prLabel, runUrl, totals } from './fleet-model'
 import { answerAsk, clearRun } from './fleet-poll'
 import { renderStrip } from './autopilot-strip'
 import { mod, poll } from './state'
@@ -223,6 +223,11 @@ function runRow($: EngineInterface, kit: Kit, now: number, cell: FleetCell, r: F
           </Text>
         </Box>
         {deputyCell(kit, r.deputy)}
+        {costLabel(r) !== '' && (
+          <Box flexShrink={0} marginLeft={1}>
+            <Text dimColor>{costLabel(r)}</Text>
+          </Box>
+        )}
         {ageCell(kit, age(r.completedAt || r.createdAt, now))}
         {canClear && r.state !== 'parked' && (
           <Box flexShrink={0} marginLeft={1}>
