@@ -129,6 +129,7 @@ export function toRun(v: unknown): FleetRun {
     createdAt: str(r.created_at),
     completedAt: str(r.completed_at),
     ...(typeof r.cost_usd === 'number' && Number.isFinite(r.cost_usd) && { costUsd: r.cost_usd }),
+    ...(typeof r.timeout_remaining_secs === 'number' && Number.isFinite(r.timeout_remaining_secs) && { timeLeftSecs: r.timeout_remaining_secs }),
   }
 }
 

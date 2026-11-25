@@ -51,6 +51,9 @@ export type FleetRun = {
   // Its estimated cost so far in USD (runs_list cost_usd); absent when the
   // server does not say.
   costUsd?: number
+  // Seconds before a live run times out, extensions and pauses counted
+  // (runs_list timeout_remaining_secs); absent when the server does not say.
+  timeLeftSecs?: number
 }
 
 export type FleetCell = {

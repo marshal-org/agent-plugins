@@ -1393,13 +1393,16 @@ test('#3016 Q1: the decision reads the linked issue first, as data, then decides
       prompt.includes('READS SO FAR')
         ? decision({ gate: 'approve_plan', rule_id: 'preset.approve-plan' })
         : reply({ read: { tool: 'issue', args: { repo: 'acme/app', number: 7 } } }),
-    gh: argv => (argv.join(' ') === 'gh issue view 7 --repo acme/app --comments' ? { stdout: 'Operator comment: approve the split into two PRs.' } : undefined),
+    // As JSON, body included: `--comments` off a terminal prints only the
+    // comments, so an issue with none read as empty.
+    gh: argv => (argv.join(' ') === 'gh issue view 7 --repo acme/app --json title,body,state,labels,comments' ? { stdout: '{"title":"Split","body":"Design: two PRs.","comments":[{"body":"Operator comment: approve the split into two PRs."}]}' } : undefined),
   })
   await start($, w)
   expect(w.answers().map(c => c.args.answer)).toEqual(['Approve'])
   expect(w.prompts).toHaveLength(2)
   // The read comes back as untrusted data, in its own block.
-  expect(w.prompts[1]!.prompt).toContain('<untrusted-content source="read 1 issue">\nOperator comment: approve the split into two PRs.')
+  expect(w.prompts[1]!.prompt).toContain('<untrusted-content source="read 1 issue">\n{"title":"Split","body":"Design: two PRs."')
+  expect(w.prompts[1]!.prompt).toContain('Operator comment: approve the split into two PRs.')
   // The system prompt tells the model it may read.
   expect(w.prompts[0]!.system).toContain('INVESTIGATE FIRST')
 })

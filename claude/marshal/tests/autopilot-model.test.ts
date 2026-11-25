@@ -2,7 +2,7 @@
 // its plain-words read-back, the decision guard, the journal entry cap. No
 // engine calls.
 
-import { leaderWords, outranks, mib, nextClass } from '../hooks/autopilot-engine'
+import { EXTEND_UNDER_SECS, leaderWords, mib, needsTime, nextClass, outranks } from '../hooks/autopilot-engine'
 import { expect, test } from 'claude-code/testing'
 
 import { askBlock, decisionsBlock, guard, mentionProtect, parseModelJson, untrusted, type AskInput } from '../hooks/autopilot-decide'
@@ -338,4 +338,23 @@ test('which plugin version may take the lock over', () => {
   expect(outranks('0.7.4', '0.7.4')).toBe(false)
   expect(outranks('0.7.4', '0.8.0')).toBe(false)
   expect(outranks('', '')).toBe(false) // own version unknown: never take over
+})
+
+test('time is added only when a run is running out, once', () => {
+  const now = Date.parse('2026-11-26T12:00:00Z')
+  const started = '2026-11-26T11:59:00Z'
+  // The server says how much is left: a fresh run with 89 minutes is left alone.
+  expect(needsTime({ timeLeftSecs: 89 * 60, createdAt: started }, now, 0)).toBe(false)
+  expect(needsTime({ timeLeftSecs: EXTEND_UNDER_SECS - 1, createdAt: started }, now, 0)).toBe(true)
+  // Just extended (the list may still show the old time left): not again.
+  expect(needsTime({ timeLeftSecs: 60, createdAt: started }, now, now - 60_000)).toBe(false)
+  // A server without time left: nothing in the first hour, then every 90 minutes.
+  expect(needsTime({ createdAt: started }, now, 0)).toBe(false)
+  expect(needsTime({ createdAt: '2026-11-26T10:30:00Z' }, now, 0)).toBe(true)
+  expect(needsTime({ createdAt: '2026-11-26T10:30:00Z' }, now, now - 30 * 60_000)).toBe(false)
+})
+
+test("the ask block names the run's pull requests by number", () => {
+  const a: AskInput = { askId: 'a', runId: 'r', rung: 'ask', deputy: 'shipper', runTitle: 'factorymeter#50', question: 'Approve the spec for factorymeter#50?', context: '', choices: ['Approve'], allowFreeText: false, repos: ['marshal-org/factorymeter'], prs: ['marshal-org/factorymeter#51 (open)'] }
+  expect(askBlock(a)).toContain("The run's pull requests (read these for its brief, spec or plan; the issue number is not the PR): marshal-org/factorymeter#51 (open)")
 })

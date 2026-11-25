@@ -363,6 +363,7 @@ async function gather($: EngineInterface, c: Cycle, cell: FleetCell, a: FleetAsk
     choices: read.input.choices ?? exactChoices(a),
     allowFreeText: read.input.allowFreeText ?? (a.choices.length === 0 && a.rung !== 'approve'),
     repos: [...new Set(prs.map(p => p.repo))],
+    prs: prs.filter(p => p.repo && p.number > 0).map(p => `${p.repo}#${p.number}${p.state ? ` (${p.state})` : ''}`),
     knownRepos: knownRepos(c, cell),
   }
   // Component rules need what the run's work changes: its pull requests'
@@ -780,6 +781,25 @@ async function lastTurnAt($: EngineInterface, server: string, runId: string): Pr
 
 export const EXTEND_EVERY_MS = 90 * 60_000
 export const EXTEND_SECS = 2 * 3600
+// Time is added only when a run has less than this left. The server's time
+// left counts every extension, so a second session (or a second check before
+// the list refreshes) sees the time already added and adds none.
+export const EXTEND_UNDER_SECS = 20 * 60
+// A server that does not report time left: no run is extended before it is
+// this old (a deputy's budget is rarely under it), then at most every
+// EXTEND_EVERY_MS by this session's journal.
+export const EXTEND_MIN_AGE_MS = 60 * 60_000
+// After adding time, the list may still show the old time left for a cycle.
+const EXTEND_SETTLE_MS = 5 * 60_000
+
+// Whether a running run needs more time now.
+export function needsTime(r: Pick<FleetRun, 'timeLeftSecs' | 'createdAt'>, now: number, lastExtend: number): boolean {
+  if (now - lastExtend < EXTEND_SETTLE_MS) return false
+  if (r.timeLeftSecs !== undefined) return r.timeLeftSecs < EXTEND_UNDER_SECS
+  const created = Date.parse(r.createdAt)
+  if (!Number.isFinite(created) || now - created < EXTEND_MIN_AGE_MS) return false
+  return now - lastExtend >= EXTEND_EVERY_MS
+}
 // Only runs that ended this recently are resumed (not old failures).
 export const RESUME_WINDOW_MS = 2 * 3600_000
 const ENDED_BAD = new Set(['failed', 'timed_out'])
@@ -877,7 +897,7 @@ async function careRuns($: EngineInterface, c: Cycle, cell: FleetCell, apc: ApCe
 
   if (care.extendTimeouts && apc.hasTimeout) {
     for (const r of running) {
-      if (c.now - lastCare(r.id, 'extend') < EXTEND_EVERY_MS) continue
+      if (!needsTime(r, c.now, lastCare(r.id, 'extend'))) continue
       if (shadow) {
         await record($, careEntry(c, cell.server, r, 'notified', 'extend', 'Shadow: would add 2 hours to its time budget'))
         continue

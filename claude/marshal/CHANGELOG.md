@@ -3,6 +3,15 @@
 Each release of the `marshal` plugin, newest first. The release on GitHub
 (`marshal-v<version>`) shows the section for its version.
 
+## 0.7.5
+
+- Autopilot adds time to a run only when it has less than 20 minutes left, by the server's time
+  left (Marshal servers that report it), instead of at the run's start and again from a second
+  session. On a server that does not report it, no run is extended in its first hour.
+- An issue Autopilot reads comes with its body. It read issues with no comments as empty and then
+  could not find a spec it was asked to approve.
+- Autopilot is told the run's pull requests by number, so it reads the PR, not the issue number.
+
 ## 0.7.4
 
 - A session on a newer plugin takes Autopilot over from one still running an older plugin,

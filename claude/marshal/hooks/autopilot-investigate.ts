@@ -71,7 +71,9 @@ export async function runRead($: EngineInterface, req: ReadRequest, ctx: ReadCon
     case 'issue': {
       const r = repoNum(args)
       if (typeof r === 'string') return r
-      return cutTo(await gh($, ['issue', 'view', String(r.number), '--repo', r.repo, '--comments']))
+      // Not `gh issue view --comments`: off a terminal it prints the comments
+      // only, so an issue with none read as empty. JSON has the body too.
+      return cutTo(await gh($, ['issue', 'view', String(r.number), '--repo', r.repo, '--json', 'title,body,state,labels,comments']))
     }
     case 'pr': {
       const r = repoNum(args)
