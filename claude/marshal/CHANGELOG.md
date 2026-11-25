@@ -3,6 +3,13 @@
 Each release of the `marshal` plugin, newest first. The release on GitHub
 (`marshal-v<version>`) shows the section for its version.
 
+## 0.7.3
+
+- When another Claude Code session runs Autopilot, the strip names it ("runs in another Claude
+  Code session, "release-train" (~/repos/atlas)") instead of an anonymous one.
+- After /reload-plugins the same session takes Autopilot back at once, instead of standing by
+  for up to 90 seconds behind its own previous load.
+
 ## 0.7.2
 
 - Marshal Autopilot never stops a run. 0.7.0 stopped a run it took for stuck and then resumed

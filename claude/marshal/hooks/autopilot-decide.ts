@@ -162,17 +162,38 @@ type ModelJson = {
   reasoning?: unknown
 }
 
+// The first complete JSON object in the reply. Braces are matched (and ones
+// inside strings ignored), so a reply that holds two objects (a read request
+// and a verdict) or prose with braces after the object still parses; the
+// first object is the one acted on.
 export function parseModelJson(text: string): ModelJson | undefined {
   const t = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '')
-  const start = t.indexOf('{')
-  const end = t.lastIndexOf('}')
-  if (start < 0 || end <= start) return undefined
-  try {
-    const v: unknown = JSON.parse(t.slice(start, end + 1))
-    return v && typeof v === 'object' && !Array.isArray(v) ? (v as ModelJson) : undefined
-  } catch {
-    return undefined
+  for (let start = t.indexOf('{'); start >= 0; start = t.indexOf('{', start + 1)) {
+    let depth = 0
+    let inString = false
+    let escaped = false
+    for (let i = start; i < t.length; i++) {
+      const ch = t[i]
+      if (inString) {
+        if (escaped) escaped = false
+        else if (ch === '\\') escaped = true
+        else if (ch === '"') inString = false
+        continue
+      }
+      if (ch === '"') inString = true
+      else if (ch === '{') depth++
+      else if (ch === '}' && --depth === 0) {
+        try {
+          const v: unknown = JSON.parse(t.slice(start, i + 1))
+          if (v && typeof v === 'object' && !Array.isArray(v)) return v as ModelJson
+        } catch {
+          // Not an object after all: try the next opening brace.
+        }
+        break
+      }
+    }
   }
+  return undefined
 }
 
 function strs(v: unknown): string[] {
@@ -202,7 +223,7 @@ export function guard(raw: string | undefined, ask: AskInput, rules: readonly Ru
   const hit = mentionProtect(ask, rules)
   if (hit) return { kind: 'notify', reason: `protect rule ${hit.id} matches (the question mentions ${hit.mentions!.map(m => `"${m}"`).join(', ')})`, gate: '', reasoning: '', ruleId: hit.id, touches: [] }
   const j = raw === undefined ? undefined : parseModelJson(raw)
-  if (!j) return { kind: 'notify', reason: 'the decision was not valid JSON', gate: '', reasoning: '', ruleId: '', touches: [] }
+  if (!j) return { kind: 'notify', reason: `the decision was not valid JSON (it began: ${JSON.stringify((raw ?? '').trim().slice(0, 160))})`, gate: '', reasoning: '', ruleId: '', touches: [] }
   const gate = typeof j.gate === 'string' && (KINDS as readonly string[]).includes(j.gate) ? j.gate : 'other'
   const reasoning = typeof j.reasoning === 'string' ? j.reasoning.slice(0, 1200) : ''
   const touches = strs(j.touches)
@@ -281,6 +302,7 @@ function readRequest(raw: string): ReadRequest | undefined {
 export async function decide($: EngineInterface, ask: AskInput, ctx: DecideContext): Promise<Verdict> {
   const base = decisionPrompt(ask, ctx)
   const reads: string[] = []
+  let retried = false
   for (let step = 0; ; step++) {
     const last = step >= READS_MAX || !ctx.read
     const prompt = reads.length
@@ -294,7 +316,15 @@ export async function decide($: EngineInterface, ask: AskInput, ctx: DecideConte
     }
     if (!r.isAnswered) return { kind: 'notify', reason: `the model call failed (${r.reason})`, gate: '', reasoning: '', ruleId: '', touches: [] }
     const req = readRequest(r.text)
-    if (!req) return guard(r.text, ask, ctx.rules, ctx.mergeBarWords)
+    if (!req) {
+      // A reply with no JSON object gets one more try, asked for plainly.
+      if (!parseModelJson(r.text) && !retried) {
+        retried = true
+        reads.push(`YOUR LAST REPLY WAS NOT ONE JSON OBJECT. Reply with exactly one JSON object, nothing else.`)
+        continue
+      }
+      return guard(r.text, ask, ctx.rules, ctx.mergeBarWords)
+    }
     if (last) return { kind: 'notify', reason: 'the decision kept reading and never decided', gate: '', reasoning: '', ruleId: '', touches: [] }
     const out = await runRead($, req, ctx.read!)
     reads.push(`READ ${reads.length + 1}: ${req.tool} ${JSON.stringify(req.args).slice(0, 300)}\n${untrusted(`read ${reads.length + 1} ${req.tool}`, out)}`)

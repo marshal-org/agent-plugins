@@ -2,7 +2,7 @@
 // its plain-words read-back, the decision guard, the journal entry cap. No
 // engine calls.
 
-import { mib, nextClass } from '../hooks/autopilot-engine'
+import { leaderWords, mib, nextClass } from '../hooks/autopilot-engine'
 import { expect, test } from 'claude-code/testing'
 
 import { askBlock, decisionsBlock, guard, mentionProtect, parseModelJson, untrusted, type AskInput } from '../hooks/autopilot-decide'
@@ -94,7 +94,7 @@ const RULES = [...presetRules('cruise'), { id: 'billing', action: 'protect' as c
 
 test('the guard answers only what the model found, by an existing answer rule, with an offered choice', () => {
   expect(guard(decision({ gate: 'proceed', rule_id: 'preset.proceed', choice_index: 1 }), ASK, RULES)).toMatchObject({ kind: 'answer', answer: 'Stop', ruleId: 'preset.proceed' })
-  expect(guard('not json', ASK, RULES)).toMatchObject({ kind: 'notify', reason: 'the decision was not valid JSON' })
+  expect(guard('not json', ASK, RULES)).toMatchObject({ kind: 'notify', reason: expect.stringMatching(/^the decision was not valid JSON \(it began: "not json"\)/) })
   expect(guard(undefined, ASK, RULES)).toMatchObject({ kind: 'notify' })
   expect(guard(decision({ gate: 'proceed', rule_id: 'preset.proceed', protected: true }), ASK, RULES)).toMatchObject({ kind: 'notify', reason: 'a protection matches' })
   // A protection the model found through a protect rule names that rule (G-015: the journal named none).
@@ -309,4 +309,25 @@ test('next compute class after an out-of-memory stop', () => {
   // An unknown starting class takes the smallest larger one.
   expect(nextClass(k, 4000)?.id).toBe('a')
   expect(nextClass(k, 6144)).toBeUndefined()
+})
+
+test('the leading session, in words', () => {
+  expect(leaderWords({ pid: '1', name: 'release-train', cwd: '/home/p/repos/atlas' }, '/home/p')).toBe('"release-train" (~/repos/atlas)')
+  expect(leaderWords({ pid: '1', name: '', cwd: '/srv/x' })).toBe('the one in /srv/x')
+  expect(leaderWords({ pid: '9', name: '', cwd: '' })).toBe('process 9')
+  expect(leaderWords({ pid: '', name: '', cwd: '' })).toBe('another one')
+  // A folder that only starts with home's name is not under home.
+  expect(leaderWords({ pid: '1', name: 'x', cwd: '/home/p-alternate/repos' }, '/home/p')).toBe('"x" (/home/p-alternate/repos)')
+  expect(leaderWords({ pid: '1', name: 'x', cwd: '/home/p' }, '/home/p')).toBe('"x" (~)')
+})
+
+test('the first complete JSON object is read, whatever follows it', () => {
+  // A read request and a verdict in one reply: the read is acted on first.
+  expect(parseModelJson('{"read":{"tool":"pr","args":{"repo":"a/b","number":1}}}\n{"gate":"approve_merge","outcome":"answer"}')).toEqual({ read: { tool: 'pr', args: { repo: 'a/b', number: 1 } } })
+  // Prose with braces after the object.
+  expect(parseModelJson('{"gate":"other","outcome":"notify"} Note: {not json}')).toEqual({ gate: 'other', outcome: 'notify' })
+  // Braces inside strings do not end the object.
+  expect(parseModelJson('{"reasoning":"a } and a { inside","gate":"other"}')).toEqual({ reasoning: 'a } and a { inside', gate: 'other' })
+  expect(parseModelJson('```json\n{"gate":"proceed"}\n```')).toEqual({ gate: 'proceed' })
+  expect(parseModelJson('no json here')).toBeUndefined()
 })

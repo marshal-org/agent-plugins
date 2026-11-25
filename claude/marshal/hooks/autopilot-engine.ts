@@ -65,6 +65,9 @@ export const ap = {
   messagedAsks: new Set<string>(),
   // This session stood by on the last cycle (another session led).
   standby: false,
+  // This session (whoAmI) and, while it stands by, the one that leads.
+  owner: undefined as Owner | undefined,
+  leader: undefined as Lock | undefined,
 }
 
 // One Autopilot per machine: every Claude Code session with the plugin runs
@@ -73,6 +76,46 @@ export const ap = {
 // renewing (closed session) is taken over after LEAD_STALE_MS.
 export const LEAD_STALE_MS = 90_000
 
+// Which Claude Code session this is: its process id (CLAUDE_PID, the same
+// across /reload-plugins) and, from ~/.claude/sessions/<pid>.json, its name
+// and folder. Read once per load; empty when it cannot be read.
+export type Owner = { pid: string; name: string; cwd: string }
+
+async function whoAmI($: EngineInterface): Promise<Owner> {
+  if (ap.owner) return ap.owner
+  const owner: Owner = { pid: '', name: '', cwd: '' }
+  try {
+    const r = await $.process.run(['sh', '-c', 'printf %s "$CLAUDE_PID"'], { timeoutMs: 5000 })
+    if (r.exitCode === 0 && /^\d+$/.test(r.stdout.trim())) owner.pid = r.stdout.trim()
+  } catch {
+    // No shell: the lock works by load id alone.
+  }
+  if (owner.pid) {
+    try {
+      const home = await $.env.get('HOME')
+      const s = JSON.parse((await readText($, `${home}/.claude/sessions/${owner.pid}.json`)) ?? '{}') as { name?: unknown; cwd?: unknown }
+      if (typeof s.name === 'string') owner.name = s.name
+      if (typeof s.cwd === 'string') owner.cwd = s.cwd
+    } catch {
+      // The name is a label; the pid is what the lock needs.
+    }
+  }
+  ap.owner = owner
+  return owner
+}
+
+type Lock = { id: string; at: number; pid: string; name: string; cwd: string }
+
+// Who leads, in words for the strip: "release-train (~/repos/atlas)".
+export function leaderWords(l: Pick<Lock, 'pid' | 'name' | 'cwd'>, home = ''): string {
+  // Only home itself or a folder under it becomes "~" (not /home/p-other).
+  const under = home !== '' && (l.cwd === home || l.cwd.startsWith(`${home.replace(/\/$/, '')}/`))
+  const cwd = under ? `~${l.cwd.slice(home.replace(/\/$/, '').length)}` : l.cwd
+  if (l.name) return cwd ? `"${l.name}" (${cwd})` : `"${l.name}"`
+  if (cwd) return `the one in ${cwd}`
+  return l.pid ? `process ${l.pid}` : 'another one'
+}
+
 export async function leads($: EngineInterface, now: number): Promise<boolean> {
   let path = ''
   try {
@@ -80,25 +123,37 @@ export async function leads($: EngineInterface, now: number): Promise<boolean> {
   } catch {
     return true
   }
-  const read = async () => {
+  const me = await whoAmI($)
+  const read = async (): Promise<Lock> => {
     try {
-      const v = JSON.parse((await readText($, path)) ?? '') as { id?: unknown; at?: unknown }
-      return { id: typeof v.id === 'string' ? v.id : '', at: typeof v.at === 'number' ? v.at : 0 }
+      const v = JSON.parse((await readText($, path)) ?? '') as Record<string, unknown>
+      const s = (k: string) => (typeof v[k] === 'string' ? (v[k] as string) : '')
+      return { id: s('id'), at: typeof v.at === 'number' ? v.at : 0, pid: s('pid'), name: s('name'), cwd: s('cwd') }
     } catch {
-      return { id: '', at: 0 }
+      return { id: '', at: 0, pid: '', name: '', cwd: '' }
     }
   }
   const cur = await read()
-  if (cur.id && cur.id !== ap.sessionId && now - cur.at < LEAD_STALE_MS) return false
+  // Another session holds a fresh lock. The same Claude Code process after a
+  // reload (same pid, new load id) takes it back at once.
+  const mine = cur.id === ap.sessionId || (me.pid !== '' && cur.pid === me.pid)
+  if (cur.id && !mine && now - cur.at < LEAD_STALE_MS) {
+    ap.leader = cur
+    return false
+  }
   try {
-    await writePrivate($, path, JSON.stringify({ id: ap.sessionId, at: now }))
+    await writePrivate($, path, JSON.stringify({ id: ap.sessionId, at: now, pid: me.pid, name: me.name, cwd: me.cwd }))
   } catch {
     // Cannot write the lock (no shell): act alone, as before.
     return true
   }
   // Two sessions that wrote at once: the one whose write stayed leads.
   const after = await read()
-  return !after.id || after.id === ap.sessionId
+  if (after.id && after.id !== ap.sessionId) {
+    ap.leader = after
+    return false
+  }
+  return true
 }
 
 export function resetEngine(): void {
@@ -863,7 +918,7 @@ export async function autopilotCycle($: EngineInterface, input: CycleInput): Pro
   // it writes is read again when this session takes over.
   if (!ap.spaceHosted && !(await leads($, now))) {
     ap.standby = true
-    await setView($, { ...EMPTY_AUTOPILOT, state: policy.enabled ? (policy.paused ? 'paused' : 'on') : 'off', reason: 'runs in another Claude Code session on this machine; this one stands by', mode: policy.mode })
+    await setView($, { ...EMPTY_AUTOPILOT, state: policy.enabled ? (policy.paused ? 'paused' : 'on') : 'off', reason: `runs in another Claude Code session, ${ap.leader ? leaderWords(ap.leader, (await $.env.get('HOME')) ?? '') : 'on this machine'}; this one stands by`, mode: policy.mode })
     return handled
   }
   if (ap.standby) {

@@ -69,6 +69,8 @@ export type WorldOpts = {
   // sh for Autopilot's private files: 'fail' exits 1 having written nothing,
   // 'nostart' cannot start (no POSIX shell).
   sh?: (op: string) => 'fail' | 'nostart' | undefined
+  // CLAUDE_PID as this Claude Code process sees it (the leader lock).
+  pid?: string
 }
 
 export type World = ReturnType<typeof world>
@@ -140,6 +142,9 @@ export function world(on: On, opts: WorldOpts = {}) {
     const argv = [...e.argv]
     const stdin = e.init?.stdin
     runs.push({ argv, stdin })
+    if (argv[0] === 'sh' && (argv[2] ?? '').includes('CLAUDE_PID')) {
+      return { value: { exitCode: 0, stdout: opts.pid ?? '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (argv[0] === 'sh') {
       const script = argv[2] ?? ''
       const op = argv[3]
@@ -482,11 +487,12 @@ test('US2: a model failure or invalid JSON answers nothing and notifies', async 
   expect(w.answers()).toHaveLength(0)
   const j = w.journal()
   expect(j.find(e => e.ask_id === 'proceed')).toMatchObject({ outcome: 'notified', reason: 'the model call failed (api-error)' })
-  expect(j.find(e => e.ask_id === 'pick')).toMatchObject({ outcome: 'notified', reason: 'the decision was not valid JSON' })
+  expect(j.find(e => e.ask_id === 'pick')).toMatchObject({ outcome: 'notified', reason: expect.stringMatching(/^the decision was not valid JSON/) })
   expect(w.notified).toHaveLength(2)
-  // Autopilot keeps polling; the failed asks are not tried again.
+  // Autopilot keeps polling; the failed asks are not tried again. A reply
+  // that is not JSON gets one retry in the same decision: 1 + 2 calls.
   await w.clock.advance(40_000)
-  expect(w.prompts).toHaveLength(2)
+  expect(w.prompts).toHaveLength(3)
 })
 
 test('US2: at most 3 decisions per cycle; the rest wait, and notices over 3 are grouped', async ($, on) => {
@@ -1685,4 +1691,26 @@ test('a run that keeps taking model turns is never reported silent; one that sto
   // Then it stops taking turns.
   await w.clock.advance(36 * 60_000)
   expect(w.notified.filter(n => /no model turn for/.test(n))).toHaveLength(1)
+})
+
+test('standing by, the strip names the session that leads; the same process after a reload takes over at once', async ($, on) => {
+  const lock = `${DATA}/leader.json`
+  const other = { id: 'other-load', at: NOW, pid: '777', name: 'release-train', cwd: `${HOME}/repos/atlas` }
+  const w = world(on, {
+    asks: [PROCEED],
+    pid: '4242',
+    files: { [POLICY]: policyYaml({ mode: 'routine' }), [lock]: JSON.stringify(other) },
+    model: byKind([PROCEED]),
+  })
+  await start($, w)
+  expect(w.answers()).toHaveLength(0)
+  const ui = await $.ui.mount({ ...FLEET, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /runs in another Claude Code session, "release-train" \(~\/repos\/atlas\)/ })).toBeDefined()
+  await ui.unmount()
+
+  // This process held the lock before a reload: a new load id, same pid.
+  w.files.set(lock, { text: JSON.stringify({ ...other, id: 'my-old-load', pid: '4242' }), mtime: NOW, mode: '0600' })
+  await w.clock.advance(25_000)
+  expect(w.answers().map(c => c.args.ask_id)).toEqual(['proceed'])
+  expect(JSON.parse(w.files.get(lock)!.text).pid).toBe('4242')
 })
