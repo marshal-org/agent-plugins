@@ -288,11 +288,11 @@ async function act($: EngineInterface, c: Cycle, cell: FleetCell, a: FleetAsk, v
 }
 
 // What code checks on the model's own classification before acting: a merge
-// only on the repository's bar in Train, a resume only with room. Returns
+// only on the repository's bar in Cruise, a resume only with room. Returns
 // why not, or '' to go ahead.
 async function holdBack($: EngineInterface, c: Cycle, cell: FleetCell, a: FleetAsk, v: Extract<Verdict, { kind: 'answer' }>, apc: ApCell, prs: FleetPr[]): Promise<string> {
   if (v.gate === 'approve_merge') {
-    if (c.policy.mode !== 'train') return 'merges go to you outside Train'
+    if (c.policy.mode !== 'cruise') return 'merges go to you outside Cruise'
     if (!c.policy.mergeBar) return 'the merge bar is off'
     const open = prs.filter(p => p.state === 'open')
     if (open.length !== 1) return open.length === 0 ? 'the run has no open pull request to check' : `the run has ${open.length} open pull requests`
@@ -674,7 +674,7 @@ export async function autopilotCycle($: EngineInterface, input: CycleInput): Pro
 
 // Kept for the skill and explain: the rules a mode applies, by id.
 export function knownRules(p: Policy, o: Overlay | undefined): Rule[] {
-  return [...activeRules(p, o), ...presetRules('train')]
+  return [...activeRules(p, o), ...presetRules('cruise')]
 }
 
 export { journal }

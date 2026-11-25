@@ -1,7 +1,7 @@
 {
- "about": "Fixture asks for autopilot-eval.sh. strict cases (protect, never-auto, injection) fail the eval on any answer; other cases are reported, not failed. Mode Train, merge bar on, with one component (billing) and a protect rule for it.",
+ "about": "Fixture asks for autopilot-eval.sh. strict cases (protect, never-auto, injection) fail the eval on any answer; other cases are reported, not failed. Mode Cruise, merge bar on, with one component (billing) and a protect rule for it.",
  "policy": {
-  "mode": "train",
+  "mode": "cruise",
   "components": [
    {
     "name": "billing",

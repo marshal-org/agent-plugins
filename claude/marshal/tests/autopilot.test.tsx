@@ -263,7 +263,7 @@ test('US1: setup shows the modes and the never-auto list, reads the policy back,
   await start($, w)
   const status = await tool($, 'autopilot_status')
   expect(status.state).toBe('off')
-  expect((status.modes as string[]).map(m => m.split(':')[0])).toEqual(['Shadow', 'Routine', 'Train'])
+  expect((status.modes as string[]).map(m => m.split(':')[0])).toEqual(['Shadow', 'Routine', 'Cruise'])
   expect((status.never_auto as string[]).join(' ')).toMatch(/taking over.*credentials.*staging or production.*release.*deleting/)
 
   const preview = await tool($, 'autopilot_setup', { confirm: false })
@@ -367,7 +367,7 @@ test('US1: the strip says "Autopilot is on" with a moving indicator, never the m
     const after = JSON.stringify(await ui.drawn({ in: 'ap:indicator' }))
     expect(after).not.toBe(before)
     // No mode name anywhere in the strip.
-    expect(await ui.find({ type: 'Text', text: /\b(shadow|routine|train)\b/i })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /\b(shadow|routine|cruise)\b/i })).toBeUndefined()
     await ui.unmount()
   }
 })
@@ -691,14 +691,14 @@ test('US2: in a space a takeover the platform will not let it answer goes to the
 // action, in every mode and paused, with the protect rule listed before and
 // after the answer rule. The stubbed model reports the match; code obeys it.
 const TABLE_ASKS = [...ROUTINE_ASKS, ...NEVER_AUTO_ASKS]
-for (const mode of ['shadow', 'routine', 'train', 'paused'] as const) {
+for (const mode of ['shadow', 'routine', 'cruise', 'paused'] as const) {
   for (const order of ['protect first', 'answer first'] as const) {
     test(`US2: the protection table: ${mode}, ${order}: nothing answered, one notice each`, async ($, on) => {
       const w = world(on, {
         asksAt: n => (n === 0 ? [] : TABLE_ASKS),
         files: {
           [POLICY]: policyYaml({
-            mode: mode === 'paused' ? 'train' : mode,
+            mode: mode === 'paused' ? 'cruise' : mode,
             paused: mode === 'paused',
             mergeBar: true,
             extra: 'limits:\n  answers_per_cycle: 20\n  notify_group_over: 50\nrules:\n  - id: guard-all\n    action: protect\n    says: everything goes to me',
@@ -764,7 +764,7 @@ function mergeWorld(on: On, opts: { bar?: boolean; mode?: string; threads?: read
   const merge = ROUTINE_ASKS[5]!
   return world(on, {
     asks: [merge],
-    files: { [POLICY]: policyYaml({ mode: opts.mode ?? 'train', mergeBar: opts.bar ?? true }) },
+    files: { [POLICY]: policyYaml({ mode: opts.mode ?? 'cruise', mergeBar: opts.bar ?? true }) },
     model: byKind([merge]),
     mcp: c => (c.tool === 'runs_prs' && c.args.run_id === merge.run_id ? text(prEvents('acme/app', 12)) : undefined),
     gh: argv => {
@@ -782,7 +782,7 @@ function mergeWorld(on: On, opts: { bar?: boolean; mode?: string; threads?: read
   })
 }
 
-test('US2: Train approves a merge only when checks, reviews and threads hold at the head, and never merges', async ($, on) => {
+test('US2: Cruise approves a merge only when checks, reviews and threads hold at the head, and never merges', async ($, on) => {
   const ok = mergeWorld(on, {})
   await start($, ok)
   expect(ok.answers().map(c => c.args.answer)).toEqual(['Merge'])
@@ -802,7 +802,7 @@ for (const [name, opts, why] of [
   // Routine has no merge rule at all: the model naming one is not obeyed.
   ['Routine mode', { mode: 'routine' }, /"preset\.approve-merge" does not exist/],
 ] as const) {
-  test(`US2: Train does not approve a merge with ${name}`, async ($, on) => {
+  test(`US2: Cruise does not approve a merge with ${name}`, async ($, on) => {
     const w = mergeWorld(on, opts)
     await start($, w)
     expect(w.answers()).toHaveLength(0)
@@ -840,7 +840,7 @@ test('US2: an org that answers approvals only on the web: the ask goes to the pe
   const plan = ROUTINE_ASKS[4]!
   const w = world(on, {
     asks: [plan],
-    files: { [POLICY]: policyYaml({ mode: 'train' }) },
+    files: { [POLICY]: policyYaml({ mode: 'cruise' }) },
     model: byKind([plan]),
     mcp: c => (c.tool === 'inbox_get' ? text(inboxGet(plan, { answerable: false, blocked: 'approval_gates_disabled' })) : undefined),
   })
@@ -1011,7 +1011,7 @@ test('US3: an invalid policy keeps Autopilot off with the reason, and nothing is
   await start($, w)
   expect(w.prompts).toHaveLength(0)
   const ui = await $.ui.mount({ ...FLEET, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /the policy is invalid: mode must be one of shadow, routine, train/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /the policy is invalid: mode must be one of shadow, routine, cruise/ })).toBeDefined()
   await ui.unmount()
 })
 

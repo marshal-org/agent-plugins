@@ -31,7 +31,7 @@ export type Policy = {
   // Only these deputies / repositories, when set.
   watchDeputies: string[]
   watchRepos: string[]
-  // Train mode approves merges only when this is on.
+  // Cruise mode approves merges only when this is on.
   mergeBar: boolean
   // The model the decision call uses (an alias or id).
   model: string
@@ -144,7 +144,10 @@ export function validatePolicy(y: Yaml): Policy {
   if (!isObj(y)) throw new Error('the policy must be a mapping of settings')
   const version = y.version ?? 1
   if (version !== 1) throw new Error('version must be 1')
-  const mode = str(y.mode, 'mode', 'shadow')
+  // Cruise was called Train before 0.5.0; a policy saved then still loads
+  // and is written back as cruise on its next save.
+  const raw = str(y.mode, 'mode', 'shadow')
+  const mode = raw === 'train' ? 'cruise' : raw
   if (!(MODES as readonly string[]).includes(mode)) throw new Error(`mode must be one of ${MODES.join(', ')}`)
   const servers = strList(y.servers, 'servers')
   if (servers.length === 0) throw new Error('servers must name at least one Marshal server (its /mcp name)')
@@ -259,7 +262,7 @@ export function policyWords(p: Policy): string[] {
   return [
     `Mode ${p.mode}. ${p.enabled ? (p.paused ? 'Paused.' : 'On.') : 'Off (stopped).'}`,
     `Watches ${list(p.servers)}${p.watchDeputies.length ? `, deputies ${list(p.watchDeputies)}` : ''}${p.watchRepos.length ? `, repositories ${list(p.watchRepos)}` : ''}.`,
-    `Merge bar ${p.mergeBar ? 'on: Train approves a merge only when required checks pass, reviews are given and no thread is open at the head' : 'off: merges always go to you'}.`,
+    `Merge bar ${p.mergeBar ? 'on: Cruise approves a merge only when required checks pass, reviews are given and no thread is open at the head' : 'off: merges always go to you'}.`,
     `Desktop notifications ${p.notifyDesktop ? 'on' : 'off'} (toasts and the strip always).`,
     `At most ${p.limits.answersPerCycle} answers per check; more than ${p.limits.notifyGroupOver} notices at once are grouped; questions under ${p.limits.expiryMinutes} minutes from expiry are escalated; a running run silent for ${p.limits.silenceMinutes} minutes is reported.`,
     ...p.components.map(c => `Component ${c.name}: ${c.repo ? `${c.repo} ` : ''}${c.paths.join(', ')}.`),
@@ -352,7 +355,7 @@ function parseDecision(v: Yaml, where: string): Decision {
 // The ids an overlay rule may not take: the policy's own rules' and every
 // preset's. Two rules with one id would let the model name the wrong one.
 export function reservedIds(p: Policy): Set<string> {
-  return new Set([...p.rules.map(r => r.id), ...presetRules('train').map(r => r.id), ...presetRules('routine').map(r => r.id)])
+  return new Set([...p.rules.map(r => r.id), ...presetRules('cruise').map(r => r.id), ...presetRules('routine').map(r => r.id)])
 }
 
 export function checkOverlayIds(rules: readonly Rule[], reserved: ReadonlySet<string>): void {

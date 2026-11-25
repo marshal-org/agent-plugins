@@ -29,7 +29,7 @@ and `problem` when something is wrong. Show the person:
 - **Routine**: answers flow and approach picks the run recommends, going ahead with a
   recommendation, one re-run of a check that failed on a flake, and resuming paused work when
   the server has room. Plans, specs and merges go to the person.
-- **Train**: Routine, plus approving a brief, plan or spec within the person's guidance, and
+- **Cruise**: Routine, plus approving a brief, plan or spec within the person's guidance, and
   approving a merge only when the merge bar is on and the pull request meets the repository's
   own required checks and reviews with no open review threads. The run merges, never Autopilot.
 - **Never auto-answered, in any mode**: the `never_auto` list (takeovers, access or credential
@@ -57,12 +57,12 @@ brief, each item with your recommendation pre-selected:
 
 1. **Where to watch**: which Marshal server (default: `server_connected` from status) and,
    optionally, only some deputies or repositories. Recommend: the connected server, all runs.
-2. **Mode**: Shadow, Routine or Train. Recommend Shadow. In a Marshal space (an unattended
+2. **Mode**: Shadow, Routine or Cruise. Recommend Shadow. In a Marshal space (an unattended
    session) recommend Shadow even more firmly; the person may still pick another.
 3. **What always goes to them**: areas to protect, as components (a repository and path
    globs, such as `services/billing/**`) with a protect rule each. Recommend: ask which parts
    of their repositories are sensitive (billing, auth, infrastructure); none is a valid answer.
-4. **Merges**: may Train approve merges, on the bar above? Recommend: off until they have
+4. **Merges**: may Cruise approve merges, on the bar above? Recommend: off until they have
    watched Shadow on a train.
 5. **How to reach them**: desktop notifications on or off (toasts and the strip always).
    Recommend: on.

@@ -2,7 +2,7 @@
 // bundles, in the same schema as the person's own rules, so one evaluator
 // covers both. Pure data and functions; no engine calls.
 
-export const MODES = ['shadow', 'routine', 'train'] as const
+export const MODES = ['shadow', 'routine', 'cruise'] as const
 export type Mode = (typeof MODES)[number]
 
 // The kinds of question the model recognises from an ask's wording.
@@ -92,11 +92,11 @@ const PRESET: Record<string, Rule> = {
 }
 
 const ROUTINE = ['pick_approach', 'proceed', 'rerun_check', 'resume']
-const TRAIN = [...ROUTINE, 'approve_plan', 'approve_merge']
+const CRUISE = [...ROUTINE, 'approve_plan', 'approve_merge']
 
-// The preset rules a mode applies. Shadow shows what Train would answer.
+// The preset rules a mode applies. Shadow shows what Cruise would answer.
 export function presetRules(mode: Mode): Rule[] {
-  const keys = mode === 'routine' ? ROUTINE : TRAIN
+  const keys = mode === 'routine' ? ROUTINE : CRUISE
   return keys.map(k => PRESET[k]!)
 }
 
@@ -107,8 +107,8 @@ export function modeWords(mode: Mode): string {
       return 'Shadow: answers nothing. For every question it shows what it would answer and under which rule, so you can check the rules first.'
     case 'routine':
       return 'Routine: answers flow and approach picks the run recommends, going ahead with a recommendation, one re-run of a check that failed on a flake, and resuming paused work when the server has room. Plans, specs and merges go to you.'
-    case 'train':
-      return "Train: everything Routine answers, plus approving a brief, plan or spec within your guidance, and approving a merge when the merge bar is on and the pull request meets the repository's own checks, reviews and has no open threads."
+    case 'cruise':
+      return "Cruise: everything Routine answers, plus approving a brief, plan or spec within your guidance, and approving a merge when the merge bar is on and the pull request meets the repository's own checks, reviews and has no open threads."
   }
 }
 

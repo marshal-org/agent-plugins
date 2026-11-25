@@ -48,11 +48,11 @@ export const TOOL_SPECS = [
     inputSchema: {
       ...obj,
       properties: {
-        mode: { type: 'string', enum: [...MODES], description: 'shadow (recommended to start), routine or train' },
+        mode: { type: 'string', enum: [...MODES], description: 'shadow (recommended to start), routine or cruise' },
         servers: { ...strArr, description: 'Marshal MCP server names to watch, as /mcp lists them; empty: the one the fleet pane reads' },
         watch_deputies: { ...strArr, description: 'only these deputies (slugs); empty: all' },
         watch_repos: { ...strArr, description: 'only these repositories (owner/repo); empty: all' },
-        merge_bar: { type: 'boolean', description: "Train approves merges when the PR meets the repo's required checks, reviews and has no open threads" },
+        merge_bar: { type: 'boolean', description: "Cruise approves merges when the PR meets the repo's required checks, reviews and has no open threads" },
         notify_desktop: { type: 'boolean' },
         model: { type: 'string', description: 'model alias for decisions; default sonnet' },
         limits: { ...obj, properties: { answers_per_cycle: { type: 'number' }, expiry_minutes: { type: 'number' }, silence_minutes: { type: 'number' }, notify_group_over: { type: 'number' }, journal_days: { type: 'number' } } },
@@ -79,7 +79,7 @@ export const TOOL_SPECS = [
   },
   {
     name: 'autopilot_control',
-    description: 'Marshal Autopilot: pause, resume, stop (off until started), start, or set the mode (shadow, routine, train).',
+    description: 'Marshal Autopilot: pause, resume, stop (off until started), start, or set the mode (shadow, routine, cruise).',
     inputSchema: { ...obj, properties: { action: { type: 'string', enum: ['pause', 'resume', 'stop', 'start', 'mode'] }, mode: { type: 'string', enum: [...MODES] } }, required: ['action'] },
   },
   {

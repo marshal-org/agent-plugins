@@ -2,7 +2,7 @@ import type { EngineInterface } from 'claude-code'
 
 // What Autopilot reads from GitHub, with the person's own `gh` in this
 // session: a pull request's files (for component rules), its merge bar at
-// the head (Train merges), its checks and a failing job's log (US4). No
+// the head (Cruise merges), its checks and a failing job's log (US4). No
 // token is passed to Marshal; nothing here writes to GitHub.
 
 async function gh($: EngineInterface, args: string[]): Promise<{ ok: boolean; out: string; err: string }> {

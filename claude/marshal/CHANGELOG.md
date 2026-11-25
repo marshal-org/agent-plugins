@@ -3,6 +3,12 @@
 Each release of the `marshal` plugin, newest first. The release on GitHub
 (`marshal-v<version>`) shows the section for its version.
 
+## 0.5.0
+
+- Marshal Autopilot's third mode is now called **Cruise** (it was Train), so it no longer
+  shares a name with a train of runs or the release train. A policy saved with `mode: train`
+  still loads as Cruise and is saved as `cruise` on its next change.
+
 ## 0.4.2
 
 - Marshal Autopilot never answers a question that has no text, such as a tool-permission

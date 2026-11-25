@@ -49,8 +49,10 @@ test('a policy validates, and an invalid one says why', () => {
   const p = validatePolicy(parseYaml(policyYaml(newPolicy('marshal-example'))))
   expect(p.mode).toBe('shadow')
   expect(p.limits.answersPerCycle).toBe(3)
-  expect(() => validatePolicy(parseYaml('mode: turbo\nservers: [a]'))).toThrow(/mode must be one of shadow, routine, train/)
+  expect(() => validatePolicy(parseYaml('mode: turbo\nservers: [a]'))).toThrow(/mode must be one of shadow, routine, cruise/)
   expect(() => validatePolicy(parseYaml('mode: shadow'))).toThrow(/servers must name at least one/)
+  // Cruise was called Train before 0.5.0: a policy saved then still loads, as cruise.
+  expect(validatePolicy(parseYaml('mode: train\nservers: [a]')).mode).toBe('cruise')
   expect(() => validatePolicy(parseYaml('servers: [a]\nrules:\n  - id: x\n    action: answer\n    kinds: [deploy]\n    guidance: go'))).toThrow(/never-auto/)
   expect(() => validatePolicy(parseYaml('servers: [a]\nrules:\n  - id: x\n    action: protect\n    components: [billing]'))).toThrow(/not one of the policy's components/)
 })
@@ -66,11 +68,11 @@ test('a rule reads back in plain words', () => {
 })
 
 test('the modes apply the Modes table', () => {
-  const kinds = (m: 'shadow' | 'routine' | 'train') => presetRules(m).flatMap(r => r.kinds ?? [])
+  const kinds = (m: 'shadow' | 'routine' | 'cruise') => presetRules(m).flatMap(r => r.kinds ?? [])
   expect(kinds('routine')).toEqual(['pick_approach', 'proceed', 'rerun_check', 'resume'])
-  expect(kinds('train')).toEqual(['pick_approach', 'proceed', 'rerun_check', 'resume', 'approve_plan', 'approve_merge'])
-  // Shadow shows what Train would answer.
-  expect(kinds('shadow')).toEqual(kinds('train'))
+  expect(kinds('cruise')).toEqual(['pick_approach', 'proceed', 'rerun_check', 'resume', 'approve_plan', 'approve_merge'])
+  // Shadow shows what Cruise would answer.
+  expect(kinds('shadow')).toEqual(kinds('cruise'))
   const p = { ...newPolicy('s'), mode: 'routine' as const, rules: [{ id: 'mine', action: 'protect' as const }] }
   expect(activeRules(p, undefined)[0]!.id).toBe('mine')
 })
@@ -87,7 +89,7 @@ const ASK: AskInput = {
   allowFreeText: false,
   repos: [],
 }
-const RULES = [...presetRules('train'), { id: 'billing', action: 'protect' as const, components: ['billing'] }]
+const RULES = [...presetRules('cruise'), { id: 'billing', action: 'protect' as const, components: ['billing'] }]
 
 test('the guard answers only what the model found, by an existing answer rule, with an offered choice', () => {
   expect(guard(decision({ gate: 'proceed', rule_id: 'preset.proceed', choice_index: 1 }), ASK, RULES)).toMatchObject({ kind: 'answer', answer: 'Stop', ruleId: 'preset.proceed' })
