@@ -170,6 +170,10 @@ export function mentionProtect(ask: AskInput, rules: readonly Rule[]): Rule | un
 }
 
 export function guard(raw: string | undefined, ask: AskInput, rules: readonly Rule[]): Verdict {
+  // A question with no text (a tool-permission request whose tool call the
+  // server does not show, marshal#2981) is never answered: there is nothing
+  // to judge it by.
+  if (typeof ask.question !== 'string' || ask.question.trim() === '') return { kind: 'notify', reason: 'the question has no text to judge it by', gate: '', reasoning: '', ruleId: '', touches: [] }
   const hit = mentionProtect(ask, rules)
   if (hit) return { kind: 'notify', reason: `protect rule ${hit.id} matches (the question mentions ${hit.mentions!.map(m => `"${m}"`).join(', ')})`, gate: '', reasoning: '', ruleId: hit.id, touches: [] }
   const j = raw === undefined ? undefined : parseModelJson(raw)

@@ -3,6 +3,11 @@
 Each release of the `marshal` plugin, newest first. The release on GitHub
 (`marshal-v<version>`) shows the section for its version.
 
+## 0.4.2
+
+- Marshal Autopilot never answers a question that has no text, such as a tool-permission
+  request whose tool call the server does not show yet. It reaches you instead.
+
 ## 0.4.1
 
 - Marshal Autopilot runs unattended inside a Marshal space. When the space's stack turns on

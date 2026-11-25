@@ -284,3 +284,12 @@ test('the private-file shell scripts read the path from $1 (sh -c SCRIPT NAME PA
 test('a quoted YAML key may have spaces before its colon', () => {
   expect(parseYaml('"mode" : routine\n')).toEqual({ mode: 'routine' })
 })
+
+test('US2: a question with no text is never answered, whatever the model says', () => {
+  const rules: Rule[] = [{ id: 'preset.proceed', action: 'answer', kinds: ['proceed'], guidance: 'Proceed.' }]
+  const ask: AskInput = { askId: 'a1', runId: 'r1', rung: 'ask', deputy: 'd', runTitle: 't', question: '  ', context: '', choices: ['Allow', 'Deny'], allowFreeText: false, repos: [] }
+  const said = JSON.stringify({ gate: 'proceed', matched: ['preset.proceed'], protected: false, outcome: 'answer', rule_id: 'preset.proceed', choice_index: 0, reasoning: 'ok' })
+  const v = guard(said, ask, rules)
+  expect(v.kind).toBe('notify')
+  expect(guard(said, { ...ask, question: 'Proceed with B?' }, rules).kind).toBe('answer')
+})
