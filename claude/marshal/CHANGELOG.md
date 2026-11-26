@@ -3,6 +3,14 @@
 Each release of the `marshal` plugin, newest first. The release on GitHub
 (`marshal-v<version>`) shows the section for its version.
 
+## 0.7.6
+
+- Autopilot reads a pull request with its head and the reviews on that head first. Long review and
+  comment bodies had pushed them past the read's cut, so it kept waiting for a review that was
+  already there.
+- A question Autopilot waits on goes to the person after 30 minutes, instead of only 10 minutes
+  before it expires (a day later for a merge).
+
 ## 0.7.5
 
 - Autopilot adds time to a run only when it has less than 20 minutes left, by the server's time

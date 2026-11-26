@@ -33,6 +33,8 @@ export type JournalEntry = {
   check?: string
   pr?: string
   expires_in_min?: number
+  // When Autopilot first chose to wait on this ask (kept across re-decides).
+  waiting_since?: number
 }
 
 export const ENTRY_MAX = 4096

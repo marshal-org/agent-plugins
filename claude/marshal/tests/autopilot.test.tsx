@@ -1457,6 +1457,27 @@ test('#3016 Q5: a question still waiting near its expiry goes to the person, onc
   expect(w.notified.filter(n => /still waiting/.test(n))).toHaveLength(1)
 })
 
+test('a question waited on for 30 minutes goes to the person, once, long before it expires', async ($, on) => {
+  const w = world(on, {
+    asks: [expiring(PLAN, 24 * 60)],
+    files: { [POLICY]: policyYaml({ mode: 'cruise' }) },
+    model: () => reply({ gate: 'approve_plan', outcome: 'wait', reasoning: 'No review on the head yet.' }),
+  })
+  await start($, w)
+  const first = w.journal().at(-1)!
+  expect(first).toMatchObject({ outcome: 'waiting', waiting_since: first.at })
+  await w.clock.advance(12 * 60_000)
+  // Re-decided, still counted from the first wait.
+  expect(w.journal().filter(e => e.outcome === 'waiting').at(-1)!.waiting_since).toBe(first.at)
+  expect(w.notified).toHaveLength(0)
+  await w.clock.advance(20 * 60_000)
+  expect(w.notified.filter(n => /waited \d+ min: No review on the head yet/.test(n))).toHaveLength(1)
+  expect(w.journal().at(-1)).toMatchObject({ outcome: 'escalated' })
+  await w.clock.advance(30 * 60_000)
+  expect(w.notified.filter(n => /waited/.test(n))).toHaveLength(1)
+  expect(w.answers()).toHaveLength(0)
+})
+
 test('#3016 Q2: with the person\'s own merge bar, a merge waits until the decision says it verified it', async ($, on) => {
   const merge = ROUTINE_ASKS[5]!
   const extra = 'merge_bar_words: at least two AI agents reviewed the PR'

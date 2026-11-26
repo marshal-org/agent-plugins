@@ -28,7 +28,7 @@ export const READS_MAX = 8
 
 export const READ_TOOLS: Record<string, string> = {
   issue: '{"repo":"owner/name","number":N}: the issue with its comments (gh issue view --comments). An operator decision in a comment outranks any recommendation.',
-  pr: '{"repo":"owner/name","number":N}: the pull request: title, body, state, draft, head, review decision, reviews, comments and changed files.',
+  pr: '{"repo":"owner/name","number":N}: the pull request: its head and the reviews on that head first, then every review and comment (shortened, comments newest first), the changed files and the body.',
   pr_diff: '{"repo":"owner/name","number":N}: the pull request diff (cut).',
   pr_checks: '{"repo":"owner/name","number":N}: every check on the pull request head and its state.',
   file: '{"repo":"owner/name","ref":"<branch or sha>","path":"docs/specs/.../spec.md"}: one file at a ref, e.g. the brief, spec or plan on the pull request branch.',
@@ -55,6 +55,58 @@ function cutTo(s: string, max = READ_MAX): string {
   return s.length <= max ? s : `${s.slice(0, max)}\n… (cut at ${max} characters)`
 }
 
+type Who = { login?: string }
+type PrJson = {
+  title?: string; body?: string; state?: string; isDraft?: boolean; headRefName?: string; headRefOid?: string
+  reviewDecision?: string; mergeStateStatus?: string
+  reviews?: { author?: Who; state?: string; submittedAt?: string; body?: string; commit?: { oid?: string } }[]
+  comments?: { author?: Who; createdAt?: string; body?: string }[]
+  files?: { path?: string }[]
+}
+
+const short = (s: string | undefined, n: number) => {
+  const t = (s ?? '').trim()
+  return t.length <= n ? t : `${t.slice(0, n)}…`
+}
+
+// The pull request with what a merge bar needs first: the head and who
+// reviewed it on that head, then every review and comment shortened, then
+// the files and the body. The raw JSON put long review and comment bodies
+// first, so the reviews on the head fell past the cut and Autopilot waited
+// for a review that was there.
+export function prSummary(raw: string): string {
+  let pr: PrJson
+  try {
+    pr = JSON.parse(raw) as PrJson
+  } catch {
+    return raw
+  }
+  if (!pr || typeof pr !== 'object') return raw
+  const head = pr.headRefOid ?? ''
+  const reviews = (pr.reviews ?? []).filter(r => r != null)
+  const comments = (pr.comments ?? []).filter(c => c != null)
+  const files = (pr.files ?? []).filter(f => f != null)
+  const onHead = reviews.filter(r => head !== '' && r.commit?.oid === head)
+  const lines = [
+    `title: ${pr.title ?? ''}`,
+    `state: ${pr.state ?? ''}${pr.isDraft ? ' (draft)' : ''}; merge state: ${pr.mergeStateStatus ?? ''}; review decision: ${pr.reviewDecision || 'none'}`,
+    `head: ${head} (branch ${pr.headRefName ?? ''})`,
+    `reviews on the head (${head.slice(0, 7)}): ${onHead.length ? onHead.map(r => `${r.author?.login ?? '?'} ${r.state ?? ''} at ${r.submittedAt ?? ''}${r.body?.trim() ? '' : ' (no body: inline comments only)'}`).join('; ') : 'none'}`,
+    '',
+    `all reviews, oldest first (${reviews.length}):`,
+    ...reviews.map(r => `- ${r.author?.login ?? '?'} ${r.state ?? ''} on ${(r.commit?.oid ?? '').slice(0, 7)} at ${r.submittedAt ?? ''}: ${short(r.body, 300).replace(/\s+/g, ' ')}`),
+    '',
+    `files (${files.length}): ${files.map(f => f.path ?? '').join(', ')}`,
+    '',
+    `comments, newest first (${comments.length}):`,
+    ...[...comments].reverse().map(c => `- ${c.author?.login ?? '?'} at ${c.createdAt ?? ''}: ${short(c.body, 1500).replace(/\s+/g, ' ')}`),
+    '',
+    'body:',
+    pr.body ?? '',
+  ]
+  return lines.join('\n')
+}
+
 function repoNum(args: Record<string, unknown>): { repo: string; number: number } | string {
   const repo = typeof args.repo === 'string' ? args.repo : ''
   const number = typeof args.number === 'number' ? args.number : Number(args.number)
@@ -78,7 +130,7 @@ export async function runRead($: EngineInterface, req: ReadRequest, ctx: ReadCon
     case 'pr': {
       const r = repoNum(args)
       if (typeof r === 'string') return r
-      return cutTo(await gh($, ['pr', 'view', String(r.number), '--repo', r.repo, '--json', 'title,body,state,isDraft,headRefName,headRefOid,reviewDecision,reviews,comments,files,mergeStateStatus']))
+      return cutTo(prSummary(await gh($, ['pr', 'view', String(r.number), '--repo', r.repo, '--json', 'title,body,state,isDraft,headRefName,headRefOid,reviewDecision,reviews,comments,files,mergeStateStatus'])))
     }
     case 'pr_diff': {
       const r = repoNum(args)

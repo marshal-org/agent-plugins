@@ -181,6 +181,14 @@ const OPEN = new Set(['pending', 'claimed', ''])
 
 // A question Autopilot waits on is decided again this often while it is open.
 export const RECHECK_MS = 5 * 60_000
+// A question waited on this long goes to the person: a merge ask can stay
+// open for a day, and the person should not first hear of it near expiry.
+export const WAIT_MAX_MS = 30 * 60_000
+
+// When an ask was first waited on: carried over from the last wait.
+export function waitingSince(prior: JournalEntry | undefined, now: number): number {
+  return prior?.outcome === 'waiting' ? (prior.waiting_since ?? prior.at) : now
+}
 
 type Notice = { text: string; urgent: boolean }
 
@@ -494,9 +502,11 @@ async function decideOne($: EngineInterface, c: Cycle, cell: FleetCell, a: Fleet
   // The journal and the strip show the choices collapsed; the answer sent is
   // the exact choice text.
   const asked = { ...a, question: input.question, choices: read.shown ?? a.choices }
+  const prior = seen(a.askId)
   if (verdict.kind === 'wait') {
-    // Decided again on a later check; the person hears only near expiry.
-    await record($, entry(c, cell, asked, 'waiting', verdict))
+    // Decided again on a later check; the person hears after WAIT_MAX_MS or
+    // near expiry.
+    await record($, entry(c, cell, asked, 'waiting', verdict, { waiting_since: waitingSince(prior, c.now) }))
     return
   }
   if (verdict.kind === 'notify') {
@@ -515,7 +525,7 @@ async function decideOne($: EngineInterface, c: Cycle, cell: FleetCell, a: Fleet
     // A bar that can still be met (checks running, threads open, reviews
     // coming) is waited on, not handed to the person.
     if (verdict.gate === 'approve_merge' && WAITABLE.test(why)) {
-      await record($, entry(c, cell, asked, 'waiting', { ...verdict, reason: why }))
+      await record($, entry(c, cell, asked, 'waiting', { ...verdict, reason: why }, { waiting_since: waitingSince(prior, c.now) }))
       return
     }
     await record($, entry(c, cell, asked, 'notified', { ...verdict, reason: why }))
@@ -1008,6 +1018,14 @@ export async function autopilotCycle($: EngineInterface, input: CycleInput): Pro
         if (left !== undefined && left < policy.limits.expiryMinutes && left > 0) {
           await record($, { ...j, t: new Date(now).toISOString(), at: now, outcome: 'escalated', expires_in_min: Math.round(left), reason: `still waiting: ${j.reason}` })
           notify(c, a, `still waiting: ${cut(j.reason, 100)}`, true, left)
+          handled.add(a.askId)
+          continue
+        }
+        const since = j.waiting_since ?? j.at
+        if (now - since >= WAIT_MAX_MS) {
+          const mins = Math.round((now - since) / 60_000)
+          await record($, { ...j, t: new Date(now).toISOString(), at: now, outcome: 'escalated', reason: `waited ${mins} min: ${j.reason}` })
+          notify(c, a, `waited ${mins} min: ${cut(j.reason, 100)}`, true, left)
           handled.add(a.askId)
           continue
         }

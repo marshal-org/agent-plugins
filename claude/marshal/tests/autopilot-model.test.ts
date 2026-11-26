@@ -6,6 +6,7 @@ import { EXTEND_UNDER_SECS, leaderWords, mib, needsTime, nextClass, outranks } f
 import { expect, test } from 'claude-code/testing'
 
 import { askBlock, decisionsBlock, guard, mentionProtect, parseModelJson, untrusted, type AskInput } from '../hooks/autopilot-decide'
+import { prSummary } from '../hooks/autopilot-investigate'
 import { ENTRY_MAX, entryLine, type JournalEntry } from '../hooks/autopilot-journal'
 import { activeRules, newPolicy, policyYaml, reservedIds, ruleWords, validateOverlay, validatePolicy } from '../hooks/autopilot-policy'
 import { presetRules, type Rule } from '../hooks/autopilot-presets'
@@ -357,4 +358,32 @@ test('time is added only when a run is running out, once', () => {
 test("the ask block names the run's pull requests by number", () => {
   const a: AskInput = { askId: 'a', runId: 'r', rung: 'ask', deputy: 'shipper', runTitle: 'factorymeter#50', question: 'Approve the spec for factorymeter#50?', context: '', choices: ['Approve'], allowFreeText: false, repos: ['marshal-org/factorymeter'], prs: ['marshal-org/factorymeter#51 (open)'] }
   expect(askBlock(a)).toContain("The run's pull requests (read these for its brief, spec or plan; the issue number is not the PR): marshal-org/factorymeter#51 (open)")
+})
+
+test('the PR read puts the head and the reviews on it first, before long bodies', () => {
+  const head = 'b'.repeat(40)
+  const long = 'x'.repeat(20_000)
+  const out = prSummary(JSON.stringify({
+    title: 'gzip', state: 'OPEN', headRefName: 'gz', headRefOid: head, mergeStateStatus: 'CLEAN', reviewDecision: '',
+    reviews: [
+      { author: { login: 'gemini-code-assist' }, state: 'COMMENTED', submittedAt: '2026-11-26T07:20:00Z', body: long, commit: { oid: 'a'.repeat(40) } },
+      { author: { login: 'gemini-code-assist' }, state: 'COMMENTED', submittedAt: '2026-11-26T07:43:16Z', body: '## Code Review ok', commit: { oid: head } },
+    ],
+    comments: [{ author: { login: 'ofirmakmal' }, createdAt: '2026-11-26T07:50:00Z', body: long }],
+    files: [{ path: 'apps/web/nginx.conf' }],
+    body: long,
+  }))
+  const lines = out.split('\n')
+  expect(lines[2]).toBe(`head: ${head} (branch gz)`)
+  expect(lines[3]).toBe('reviews on the head (bbbbbbb): gemini-code-assist COMMENTED at 2026-11-26T07:43:16Z')
+  expect(out.slice(0, 12_000)).toContain('files (1): apps/web/nginx.conf')
+  expect(out).toContain('- gemini-code-assist COMMENTED on aaaaaaa at 2026-11-26T07:20:00Z: ' + 'x'.repeat(300) + '…')
+  expect(prSummary('(gh failed: not found)')).toBe('(gh failed: not found)')
+  expect(prSummary('null')).toBe('null')
+  expect(prSummary(JSON.stringify({ headRefOid: head, comments: [null, { author: { login: 'a' }, body: 'one\n\ntwo' }], files: [null] }))).toContain('- a at : one two')
+})
+
+test('a head with no review says so', () => {
+  const out = prSummary(JSON.stringify({ headRefOid: 'c'.repeat(40), reviews: [{ author: { login: 'g' }, state: 'COMMENTED', body: 'b', commit: { oid: 'd'.repeat(40) } }] }))
+  expect(out).toContain('reviews on the head (ccccccc): none')
 })
