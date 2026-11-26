@@ -5,7 +5,7 @@
 import { EXTEND_UNDER_SECS, leaderWords, mib, needsTime, nextClass, outranks } from '../hooks/autopilot-engine'
 import { expect, test } from 'claude-code/testing'
 
-import { askBlock, decisionsBlock, guard, mentionProtect, parseModelJson, untrusted, type AskInput } from '../hooks/autopilot-decide'
+import { firstSentence, askBlock, decisionsBlock, guard, mentionProtect, parseModelJson, untrusted, type AskInput } from '../hooks/autopilot-decide'
 import { prSummary } from '../hooks/autopilot-investigate'
 import { ENTRY_MAX, entryLine, type JournalEntry } from '../hooks/autopilot-journal'
 import { activeRules, newPolicy, policyYaml, reservedIds, ruleWords, validateOverlay, validatePolicy } from '../hooks/autopilot-policy'
@@ -386,4 +386,12 @@ test('the PR read puts the head and the reviews on it first, before long bodies'
 test('a head with no review says so', () => {
   const out = prSummary(JSON.stringify({ headRefOid: 'c'.repeat(40), reviews: [{ author: { login: 'g' }, state: 'COMMENTED', body: 'b', commit: { oid: 'd'.repeat(40) } }] }))
   expect(out).toContain('reviews on the head (ccccccc): none')
+})
+
+test('the first sentence of the reasoning, cut', () => {
+  expect(firstSentence('The bar holds. Approving.')).toBe('The bar holds.')
+  expect(firstSentence('  one\n line, no stop  ')).toBe('one line, no stop')
+  expect(firstSentence('v0.7.6 is out? Yes.')).toBe('v0.7.6 is out?')
+  expect(firstSentence('')).toBe('')
+  expect(firstSentence('x'.repeat(300))).toHaveLength(160)
 })

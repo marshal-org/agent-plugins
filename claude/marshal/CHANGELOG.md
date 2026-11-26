@@ -3,6 +3,12 @@
 Each release of the `marshal` plugin, newest first. The release on GitHub
 (`marshal-v<version>`) shows the section for its version.
 
+## 0.7.7
+
+- A question Autopilot hands to you says why in its decision's own words (for example, that a
+  merge's choices accept a gap your merge bar sends to you), instead of "no rule covers it" when a
+  rule did match.
+
 ## 0.7.6
 
 - Autopilot reads a pull request with its head and the reviews on that head first. Long review and

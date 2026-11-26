@@ -315,7 +315,7 @@ test('US1: in Shadow a routine ask gets a would-answer entry and a strip row, an
 
 test('US1: an ask no rule covers notifies the person and waits on them', async ($, on) => {
   const other = { ...PROCEED, ask_id: 'odd', run_id: 'run-odd', kind: 'other', question: 'Rename the project?' }
-  const w = world(on, { asks: [other], files: { [POLICY]: policyYaml() }, model: () => decision({ gate: 'other' }) })
+  const w = world(on, { asks: [other], files: { [POLICY]: policyYaml() }, model: () => decision({ gate: 'other', reasoning: '' }) })
   await start($, w)
   expect(w.journal()[0]).toMatchObject({ ask_id: 'odd', outcome: 'notified', reason: 'no rule covers it' })
   expect(w.toasts.some(t => t.includes('Rename the project?') && t.includes('Autopilot: no rule covers it'))).toBe(true)
@@ -1554,13 +1554,23 @@ test('Autopilot never stops a run, however long it is quiet, even with an old st
   expect(w.files.get(POLICY)!.text).toContain('stop_stuck: true')
 })
 
+test('an ask handed to the person says why, in the decision\'s first sentence', async ($, on) => {
+  const merge = { ...PROCEED, ask_id: 'gap', run_id: 'run-gap', question: 'Merge #3070?', choices: ['Approve, live gap accepted, I will merge', 'Request changes'] }
+  const reasoning = 'Both approving choices say "live gap accepted", and your merge bar sends accepted gaps to you. Request changes has no finding behind it.'
+  const w = world(on, { asks: [merge], files: { [POLICY]: policyYaml() }, model: () => decision({ gate: 'approve_merge', reasoning }) })
+  await start($, w)
+  const why = 'Both approving choices say "live gap accepted", and your merge bar sends accepted gaps to you.'
+  expect(w.journal()[0]).toMatchObject({ ask_id: 'gap', outcome: 'notified', reason: why, reasoning })
+  expect(w.toasts.some(t => t.includes('Merge #3070?') && t.includes('your merge bar sends accepted gaps to you'))).toBe(true)
+})
+
 test('#3016 Q6: a notice also reaches the person through the channel they named', async ($, on) => {
   const odd = ROUTINE_ASKS[0]!
   const reach = ['reach:', '  - server: slack', '    tool: send_message', '    says: my Slack DM', '    args:', '      channel: D123', '      text: "{text}"'].join('\n')
   const w = world(on, {
     asks: [odd],
     files: { [POLICY]: policyYaml({ mode: 'cruise', extra: reach }) },
-    model: () => decision({ gate: 'other' }),
+    model: () => decision({ gate: 'other', reasoning: '' }),
   })
   await start($, w)
   const sent = w.calls.filter(c => c.server === 'slack' && c.tool === 'send_message')

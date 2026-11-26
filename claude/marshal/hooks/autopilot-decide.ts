@@ -52,6 +52,16 @@ const CLOSE = '</untrusted-content>'
 
 // Run-written text as data: delimited, with any marker inside it defused so
 // the text cannot close its own block.
+// The first sentence of the decision's reasoning, for the strip and the
+// toast (the full reasoning stays in the journal).
+export function firstSentence(text: string, max = 160): string {
+  const t = text.trim().replace(/\s+/g, ' ')
+  if (!t) return ''
+  const m = /^(.+?[.!?])(\s|$)/.exec(t)
+  const s = m ? m[1]! : t
+  return s.length <= max ? s : `${s.slice(0, max - 1)}…`
+}
+
 export function untrusted(source: string, text: string): string {
   const body = text.replace(/<\/?untrusted-content/gi, m => m.replace('<', '&lt;'))
   return `${OPEN} source="${source.replace(/[^A-Za-z0-9 #./_:-]/g, '')}">\n${body}\n${CLOSE}`
@@ -244,7 +254,14 @@ export function guard(raw: string | undefined, ask: AskInput, rules: readonly Ru
   if (protect) return named(`protect rule ${protect} matches`, protect)
   if (j.protected === true) return notify('a protection matches')
   if (j.outcome === 'wait') return { kind: 'wait', reason: reasoning || 'waiting for something that will change', gate, reasoning, ruleId, touches }
-  if (j.outcome !== 'answer' && j.outcome !== 'would_answer') return notify(ruleId ? `the model chose to ask you (${ruleId})` : 'no rule covers it')
+  // Handed to the person: say why in the decision's own first sentence (a
+  // merge bar gap, a choice it cannot honestly pick), not just that no rule
+  // answered; "no rule covers it" read as a missing rule when a rule matched.
+  if (j.outcome !== 'answer' && j.outcome !== 'would_answer') {
+    const why = firstSentence(reasoning)
+    if (why) return notify(ruleId ? `${why} (${ruleId})` : why)
+    return notify(ruleId ? `the model chose to ask you (${ruleId})` : 'no rule covers it')
+  }
   const rule = byId.get(ruleId)
   if (!rule) return notify(ruleId ? `the rule "${ruleId}" does not exist` : 'no rule covers it')
   if (rule.action !== 'answer') return notify(`protect rule ${rule.id} matches`)
